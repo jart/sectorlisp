@@ -51,10 +51,10 @@ clean:;	$(RM) $(CLEANFILES)
 lisp.bin.dbg: start.o lisp.real.o lisp.lds
 sectorlisp.bin.dbg: start.o sectorlisp.o lisp.lds
 
-start.o: start.S
-lisp.o: lisp.c lisp.h
-lisp.real.o: lisp.c lisp.h
-sectorlisp.o: sectorlisp.S
+start.o: start.S Makefile
+lisp.o: lisp.c lisp.h Makefile
+lisp.real.o: lisp.c lisp.h Makefile
+sectorlisp.o: sectorlisp.S Makefile
 
 %.real.o: %.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(REALFLAGS) -c -o $@ $<

@@ -29,7 +29,7 @@ of running natively without dependencies on modern PCs, sectorlisp might
 be the tiniest self-hosting LISP interpreter to date. 
 
 We're still far off however from reaching our goal, which is to have
-sectorilsp be small enough to fit in the master boot record of a floppy
+sectorlisp be small enough to fit in the master boot record of a floppy
 disk, like [sectorforth](https://github.com/cesarblum/sectorforth). If
 you can help this project reach its goal, please send us a pull request!
 

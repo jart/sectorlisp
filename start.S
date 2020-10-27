@@ -42,4 +42,7 @@ _begin:	push	%cs				# memory model cs=ds=es = 0x600
 	xor	%dh,%dh				# drive dl head zero
 	mov	$0x0200+v_sectors,%ax		# read sectors
 	int	$0x13				# disk service
-	jmp	main
+/	𝑠𝑙𝑖𝑑𝑒
+
+	.section .yoink
+	nop	main
