@@ -17,11 +17,11 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 
-/	@fileoverview lisp.c built for real mode with manual tuning
-/	binary footprint is approximately 960 bytes, about 40 bytes
-/	of it is overhead needed to load the second 512-byte sector
-/	so if we can find a way to reduce the code size another 400
-/	bytes we can bootstrap the metacircular evaluator in an mbr
+//	@fileoverview lisp.c built for real mode with manual tuning
+//	binary footprint is approximately 960 bytes, about 40 bytes
+//	of it is overhead needed to load the second 512-byte sector
+//	so if we can find a way to reduce the code size another 400
+//	bytes we can bootstrap the metacircular evaluator in an mbr
 
 #define NIL		0
 #define UNDEFINED	8
@@ -71,9 +71,9 @@ GetChar:xor	%ax,%ax				# get keystroke
 	xor	%ah,%ah				# ah is bios scancode
 	push	%ax				# al is ascii character
 	call	PutChar				# ax will have result
-	cmp	$'\r,%al			# don't clobber stuff
+	cmp	$'\r',%al			# don't clobber stuff
 	jne	1f
-	mov	$'\n,%al
+	mov	$'\n',%al
 	call	PutChar
 1:	pop	%ax
 	ret
@@ -135,7 +135,7 @@ GetObject:
 	cmpb	$40,q.token
 	je	GetList
 	mov	$q.token,%di
-/	𝑠𝑙𝑖𝑑𝑒
+//	𝑠𝑙𝑖𝑑𝑒
 
 Intern:	mov	%di,%bx
 	mov	$STR,%si
@@ -173,9 +173,9 @@ Intern:	mov	%di,%bx
 
 GetList:call	GetToken
 	mov	q.token,%al
-	cmp	$'),%al
+	cmp	$')',%al
 	je	2f
-	cmp	$'.,%al
+	cmp	$'.',%al
 	je	1f
 	call	GetObject
 	push	%ax			# save
@@ -203,8 +203,8 @@ EvalCons:
 	pop	%si			# restore
 	xchg	%ax,%di
 	pop	%bp
-/	jmp	Cons
-/	𝑠𝑙𝑖𝑑𝑒
+//	jmp	Cons
+//	𝑠𝑙𝑖𝑑𝑒
 
 Cons:	mov	$q.index,%bx
 	mov	(%bx),%ax
@@ -280,8 +280,8 @@ PrintObject:
 	call	PrintObject
 4:	pop	%bx
 	mov	$41,%al
-/	jmp	PutChar
-/	𝑠𝑙𝑖𝑑𝑒
+//	jmp	PutChar
+//	𝑠𝑙𝑖𝑑𝑒
 
 PutChar:push	%bx				# don't clobber bp,bx,di,si,cx
 	push	%bp				# original ibm pc scroll up bug
@@ -294,8 +294,8 @@ PutChar:push	%bx				# don't clobber bp,bx,di,si,cx
 
 Arg1:	call	Cadr
 	xchg	%ax,%di
-/	jmp	Eval
-/	𝑠𝑙𝑖𝑑𝑒
+//	jmp	Eval
+//	𝑠𝑙𝑖𝑑𝑒
 
 Eval:	push	%bp
 	mov	%di,%dx
@@ -313,7 +313,7 @@ Eval:	push	%bp
 	je	1f
 	mov	(%bx),%di
 	and	$-2,%di
-	cmp	$ATOM_LAMBDA,(%di)
+	cmpw	$ATOM_LAMBDA,(%di)
 	jne	EvalUndefined
 	mov	2(%bx),%si
 	mov	(%bx),%di
