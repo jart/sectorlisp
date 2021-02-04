@@ -178,10 +178,10 @@ GetList:call	GetToken
 	cmp	$'.',%al
 	je	1f
 	call	GetObject
-	push	%ax			# save
+	push	%ax				# save
 	call	GetList
 	xchg	%ax,%si
-	pop	%di			# restore
+	pop	%di				# restore
 	jmp	Cons
 1:	call	GetToken
 	jmp	GetObject
@@ -189,7 +189,7 @@ GetList:call	GetToken
 	ret
 
 EvalCons:
-	push	%dx			# save
+	push	%dx				# save
 	mov	2(%bx),%bx
 	mov	%bx,%di
 	call	Cadr
@@ -197,10 +197,10 @@ EvalCons:
 	mov	%bp,%si
 	call	Eval
 	mov	%bp,%si
-	pop	%di			# restore
-	push	%ax			# save
+	pop	%di				# restore
+	push	%ax				# save
 	call	Arg1
-	pop	%si			# restore
+	pop	%si				# restore
 	xchg	%ax,%di
 	pop	%bp
 //	jmp	Cons
@@ -292,6 +292,9 @@ PutChar:push	%bx				# don't clobber bp,bx,di,si,cx
 	pop	%bx
 	ret
 
+Arg1ds:	mov	%dx,%di
+	mov	%bp,%si
+//	𝑠𝑙𝑖𝑑𝑒
 Arg1:	call	Cadr
 	xchg	%ax,%di
 //	jmp	Eval
@@ -340,12 +343,15 @@ Eval:	push	%bp
 	je	EvalUndefined
 	cmp	$ATOM_QUOTE,%ax
 	jne	EvalCall
+//	𝑠𝑙𝑖𝑑𝑒
+EvalQuote:
 	xchg	%dx,%di
 	pop	%bp
 	jmp	Cadr
 1:	cmp	$ATOM_EQ,%ax
 	jne	EvalCall
-	push	%dx
+//	𝑠𝑙𝑖𝑑𝑒
+EvalEq:	push	%dx
 	mov	2(%bx),%bx
 	mov	%bx,%di
 	call	Cadr
@@ -353,20 +359,18 @@ Eval:	push	%bp
 	mov	%bp,%si
 	call	Eval
 	mov	%bp,%si
-	pop	%di			# restore
-	push	%ax			# save
+	pop	%di				# restore
+	push	%ax				# save
 	call	Arg1
-	pop	%dx			# restore
+	pop	%dx				# restore
 	cmp	%dx,%ax
 	jmp	3f
 EvalCdr:
-	mov	%dx,%di
-	mov	%bp,%si
-	call	Arg1
-	and	$-2,%ax
-	xchg	%ax,%di
-	mov	2(%di),%ax
-	pop	%bp
+	push	$2
+	jmp	EvalCarCdr
+EvalUndefined:
+	mov	$UNDEFINED,%ax
+9:	pop	%bp
 	ret
 EvalCond:
 	mov	2(%bx),%bx
@@ -388,39 +392,37 @@ EvalCond:
 	je	EvalCons
 	cmp	$ATOM_CAR,%ax
 	jne	EvalCall
-	mov	%dx,%di
-	mov	%bp,%si
-	call	Arg1
+//	𝑠𝑙𝑖𝑑𝑒
+EvalCar:
+	push	$0
+//	𝑠𝑙𝑖𝑑𝑒
+EvalCarCdr:
+	call	Arg1ds
 	and	$-2,%ax
 	xchg	%ax,%di
-	mov	(%di),%ax
-	jmp	9f
-EvalAtom:
-	mov	%bp,%si
-	mov	%dx,%di
-	call	Arg1
-	test	$1,%al
-3:	mov	$ATOM_T,%ax
-	je	9f
-	xor	%ax,%ax
-	jmp	9f
+	pop	%bx
+	mov	(%bx,%di),%ax
+	jmp	9b
 EvalCall:
-	mov	2(%bx),%cx
+	push	2(%bx)
 	mov	(%bx),%di
 	mov	%bp,%si
 	call	Assoc
-	xchg	%cx,%si
 	xchg	%ax,%di
+	pop	%si
 	call	Cons
 	jmp	1f
+EvalAtom:
+	call	Arg1ds
+	test	$1,%al
+3:	mov	$ATOM_T,%ax
+	je	9b
+	xor	%ax,%ax
+	jmp	9b
 EvalCadrLoop:
 	call	Cadr
 1:	xchg	%ax,%dx
 	jmp	0b
-EvalUndefined:
-	mov	$UNDEFINED,%ax
-9:	pop	%bp
-	ret
 
 ////////////////////////////////////////////////////////////////////////////////
 .section .rodata,"a",@progbits

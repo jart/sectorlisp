@@ -331,7 +331,7 @@ static WORD Atom(long x) {
   return BOOL(ISATOM(x));
 }
 
-WORD Eq(long x, long y) {
+static WORD Eq(long x, long y) {
   return BOOL(x == y);
 }
 

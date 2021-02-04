@@ -23,7 +23,7 @@
 ;;
 ;; Listed Projects
 ;;
-;; - 948 bytes: https://github.com/jart/sectorlisp
+;; - 836 bytes: https://github.com/jart/sectorlisp
 ;; - 13 kilobytes: https://t3x.org/klisp/
 ;; - 150 kilobytes: https://github.com/JeffBezanson/femtolisp
 ;; - Send pull request to be listed here
@@ -108,8 +108,6 @@ NIL
                ((EQ (CAR E) (QUOTE CONS)) (CONS (EVAL (CAR (CDR E)) A)
                                                 (EVAL (CAR (CDR (CDR E))) A)))
                ((EQ (CAR E) (QUOTE COND)) (EVCON (CDR E) A))
-               ((EQ (CAR E) (QUOTE LABEL)) (EVAL (CAR (CDR (CDR E)))
-                                                 (APPEND (CAR (CDR E)) A)))
                ((EQ (CAR E) (QUOTE LAMBDA)) E)
                ((QUOTE T) (EVAL (CONS (EVAL (CAR E) A) (CDR E)) A))))
             ((EQ (CAR (CAR E)) (QUOTE LAMBDA))
