@@ -441,4 +441,3 @@ kSymbols:
 	.string	"CDR"
 	.string	"CONS"
 	.string	"LAMBDA"
-	.string	""

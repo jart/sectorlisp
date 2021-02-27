@@ -72,7 +72,7 @@ _Alignas(char) const char kSymbols[] = "NIL\0"
                                        "CAR\0"
                                        "CDR\0"
                                        "CONS\0"
-                                       "LAMBDA\0";
+                                       "LAMBDA";
 
 #ifdef __REAL_MODE__
 static struct Lisp *const q;
