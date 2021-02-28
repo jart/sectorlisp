@@ -51,7 +51,7 @@ main:	mov	$q.syntax,%bx
 	movb	$46,46(%bx)
 	mov	$STR,%di
 	mov	$kSymbols,%si
-	mov	$57,%cx
+	mov	$56,%cx
 	rep movsb
 0:	call	GetChar
 	mov	%ax,q.look
