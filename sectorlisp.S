@@ -18,9 +18,9 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 
 //	@fileoverview lisp.c built for real mode with manual tuning
-//	binary footprint is approximately 960 bytes, about 40 bytes
+//	binary footprint is approximately 824 bytes, about 40 bytes
 //	of it is overhead needed to load the second 512-byte sector
-//	so if we can find a way to reduce the code size another 400
+//	so if we can find a way to reduce the code size another 300
 //	bytes we can bootstrap the metacircular evaluator in an mbr
 
 #define NIL		0
@@ -139,37 +139,33 @@ GetObject:
 
 Intern:	mov	%di,%bx
 	mov	$STR,%si
-0:	lodsb
-	test	%al,%al
-	je	4f
-	xor	%dx,%dx
-1:	mov	%dx,%di
-	mov	(%bx,%di),%cl
-	cmp	%cl,%al
-	jne	3f
-	inc	%dx
+0:	mov	%bx,%di
+	push	%si
+	lodsb
 	test	%al,%al
 	jne	2f
-	sub	%di,%si
-	lea	-STR-1(%si),%ax
-	jmp	6f
-2:	lodsb
-	jmp	1b
+	pop	%di
+	push	%di
+	mov	%bx,%si
+4:	lodsb
+	stosb
+	test	%al,%al
+	jnz	4b
+6:	pop	%ax
+	sub	$STR,%ax
+	shl	%ax
+	ret
+1:	lodsb
+2:	scasb
+	jne	5f
+	test	%al,%al
+	jne	1b
+	jmp	6b
+5:	pop	%di
 3:	test	%al,%al
 	jz	0b
 	lodsb
 	jmp	3b
-4:	lea	-1(%si),%di
-	push	%di
-	mov	%bx,%si
-0:	lodsb
-	stosb
-	test	%al,%al
-	jnz	0b
-	pop	%ax
-	sub	$STR,%ax
-6:	shl	%ax
-	ret
 
 GetList:call	GetToken
 	mov	q.token,%al
@@ -250,6 +246,15 @@ PrintString:					# nul-terminated in si
 	jmp	0b
 1:	ret
 
+PutChar:push	%bx				# don't clobber bp,bx,di,si,cx
+	push	%bp				# original ibm pc scroll up bug
+	mov	$7,%bx				# normal mda/cga style page zero
+	mov	$0x0e,%ah			# teletype output al cp437
+	int	$0x10				# vidya service
+	pop	%bp				# preserves al
+	pop	%bx
+	ret
+
 ////////////////////////////////////////////////////////////////////////////////
 .text
 
@@ -282,15 +287,6 @@ PrintObject:
 	mov	$41,%al
 //	jmp	PutChar
 //	𝑠𝑙𝑖𝑑𝑒
-
-PutChar:push	%bx				# don't clobber bp,bx,di,si,cx
-	push	%bp				# original ibm pc scroll up bug
-	mov	$7,%bx				# normal mda/cga style page zero
-	mov	$0x0e,%ah			# teletype output al cp437
-	int	$0x10				# vidya service
-	pop	%bp				# preserves al
-	pop	%bx
-	ret
 
 Arg1ds:	mov	%dx,%di
 	mov	%bp,%si
