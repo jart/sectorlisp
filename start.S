@@ -24,14 +24,12 @@ _start:	jmp	1f				# some bios scan for short jump
 1:	ljmp	$0x600>>4,$_begin		# end of bios data roundup page
 
 _begin:	push	%cs				# memory model cs=ds=es = 0x600
-	pop	%ds
 	push	%cs
+	push	%cs
+	pop	%ds
 	pop	%es
-	mov	$0x70000>>4,%ax			# last 64k of first 480k memory
-	cli					# create stack in higher memory
-	mov	%ax,%ss				# carefully avoids i8086 errata
-	xor	%sp,%sp
-	sti
+	pop	%ss
+	mov	$0x70000>>4,%sp
 	cld
 	xor	%ax,%ax
 	xor	%di,%di
