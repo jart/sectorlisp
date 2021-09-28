@@ -36,8 +36,6 @@ CLEANFILES =				\
 	lisp.bin.dbg			\
 	sectorlisp.bin.dbg
 
-lisp:	lisp.o
-
 .PHONY:	all
 all:	lisp				\
 	lisp.bin			\
@@ -49,12 +47,18 @@ all:	lisp				\
 clean:;	$(RM) $(CLEANFILES)
 
 lisp.bin.dbg: start.o lisp.real.o lisp.lds
-sectorlisp.bin.dbg: start.o sectorlisp.o lisp.lds
+lisp:	lisp.o
 
 start.o: start.S Makefile
 lisp.o: lisp.c lisp.h Makefile
 lisp.real.o: lisp.c lisp.h Makefile
-sectorlisp.o: sectorlisp.S Makefile
+
+sectorlisp.o: sectorlisp.S
+	$(AS)  -g -mtune=i386 -o $@ $<
+sectorlisp.bin.dbg: sectorlisp.o
+	$(LD) -oformat:binary -Ttext=0x7600 -o $@ $<
+sectorlisp.bin: sectorlisp.bin.dbg
+	objcopy -SO binary sectorlisp.bin.dbg sectorlisp.bin
 
 %.real.o: %.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(REALFLAGS) -c -o $@ $<

@@ -13,7 +13,7 @@
 #define ISATOM(x) /* a.k.a. !(x&1) */                        \
   ({                                                         \
     _Bool IsAtom;                                            \
-    asm("test%z1\t$1,%1" : "=@ccz"(IsAtom) : "Qm"((char)x)); \
+    asm("test%z1\t$1,%1" : "=@ccnz"(IsAtom) : "Qm"((char)x)); \
     IsAtom;                                                  \
   })
 
