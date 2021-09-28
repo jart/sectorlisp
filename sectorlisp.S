@@ -2,6 +2,7 @@
 │vi: set et ft=asm ts=8 tw=8 fenc=utf-8                                     :vi│
 ╞══════════════════════════════════════════════════════════════════════════════╡
 │ Copyright 2020 Justine Alexandra Roberts Tunney                              │
+│ Copyright 2021 Alain Greppin                                                 │
 │                                                                              │
 │ Permission to use, copy, modify, and/or distribute this software for         │
 │ any purpose with or without fee is hereby granted, provided that the         │
@@ -17,423 +18,305 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 
-//	@fileoverview lisp.c built for real mode with manual tuning
-//	binary footprint is approximately 824 bytes, about 40 bytes
-//	of it is overhead needed to load the second 512-byte sector
-//	so if we can find a way to reduce the code size another 300
-//	bytes we can bootstrap the metacircular evaluator in an mbr
+// LISP meta-circular evaluator in a MBR
 
-#define NIL		0
-#define UNDEFINED	8
-#define ATOM_T		30
-#define ATOM_QUOTE	34
-#define ATOM_ATOM	46
-#define ATOM_EQ		56
-#define ATOM_COND	62
-#define ATOM_CAR	72
-#define ATOM_CDR	80
-#define ATOM_CONS	88
-#define ATOM_LAMBDA	98
+.set NIL,		1
+.set ATOM_T,		9
+.set ATOM_QUOTE,	13
+.set ATOM_COND,		25
+.set ATOM_ATOM,		35
+.set ATOM_CAR,		45
+.set ATOM_CDR,		53
+.set ATOM_CONS,		61
+.set ATOM_EQ,		71
 
-#define STR 0x4186
+.set q.token,	0x4000
+.set q.str,	0x4080
+.set boot,	0x7c00
 
 ////////////////////////////////////////////////////////////////////////////////
-.section .start,"ax",@progbits
-.globl	main
+.section .text,"ax",@progbits
+.globl	_start
 .code16
 
-main:	mov	$q.syntax,%bx
-	mov	$32,%al
-	mov	%al,32(%bx)
-	mov	%al,13(%bx)
-	mov	%al,10(%bx)
-	movw	$10536,40(%bx)
-	movb	$46,46(%bx)
-	mov	$STR,%di
+_start:	jmp	.init				# some bios scan for short jump
+.type kSymbols,@object;
+kSymbols:
+	.ascii "NIL\0T\0QUOTE\0COND\0ATOM\0CAR\0CDR\0CONS\0EQ"
+
+.type .init,@function
+.init:	ljmp	$0x600>>4,$_begin		# end of bios data roundup page
+_begin:	push	%cs				# memory model cs=ds=es = 0x600
+	push	%cs
+	push	%cs
+	pop	%ds
+	pop	%es
+	pop	%ss
+	mov	$0x7c00-0x600,%cx
+	mov	%cx,%sp
+	cld
+	xor	%ax,%ax
+	mov	%ax,%fs				# fs = &q.mem
+	xor	%di,%di
+	rep stosb				# clears our bss memory
+main:	mov	$q.str,%di
 	mov	$kSymbols,%si
-	mov	$56,%cx
+	mov	$37,%cx
 	rep movsb
-0:	call	GetChar
-	mov	%ax,q.look
+0:	mov	$'\n',%dl
 	call	GetToken
 	call	GetObject
-	xchg	%ax,%di
-	mov	q.globals,%si
+	mov	$NIL,%dx
 	call	Eval
-	xchg	%ax,%di
 	call	PrintObject
-	mov	$kCrlf,%si
-	call	PrintString
-	jmp	0b
-
-GetChar:xor	%ax,%ax				# get keystroke
-	int	$0x16				# keyboard service
-	xor	%ah,%ah				# ah is bios scancode
-	push	%ax				# al is ascii character
-	call	PutChar				# ax will have result
-	cmp	$'\r',%al			# don't clobber stuff
-	jne	1f
-	mov	$'\n',%al
+	mov	$'\r',%al
 	call	PutChar
-1:	pop	%ax
-	ret
-
-Cadr:	and	$-2,%di				# (object >> 1) * sizeof(word)
-	mov	2(%di),%di			# contents of decrement register
-	and	$-2,%di				# contents of address register
-	mov	(%di),%ax
-	ret
-
-GetToken:
-	xor	%bx,%bx
-	mov	$q.syntax,%si
-	mov	q.look,%ax
-	mov	$q.token,%di
-0:	mov	%al,%bl
-	mov	(%bx,%si),%dl
-	mov	%dl,%bl
-	cmp	$0x20,%dl
-	jne	1f
-	call	GetChar
 	jmp	0b
-1:	test	%dl,%dl
-	je	3f
-	stosb
-	call	GetChar
-	jmp	4f
-2:	test	%bl,%bl
-	jne	4f
-	stosb
-	call	GetChar
-	mov	%ax,%bx
-	mov	(%bx,%si),%bl
-3:	test	%al,%al
-	jne	2b
-4:	movb	$0,(%di)
-	mov	%al,q.look
-	ret
 
-Assoc:	xchg	%si,%bx
-0:	test	%bx,%bx
-	je	2f
-	and	$-2,%bx
-	mov	(%bx),%si
-	and	$-2,%si
-	mov	(%si),%ax
-	cmp	%di,%ax
-	jne	1f
-	mov	(%bx),%si
-	and	$-2,%si
-	mov	2(%si),%ax
-	ret
-1:	mov	2(%bx),%bx
-	jmp	0b
-2:	xor	%ax,%ax
-	ret
-
-GetObject:
-	cmpb	$40,q.token
-	je	GetList
+GetToken:					# GetToken():al, dl is q.look
 	mov	$q.token,%di
-//	𝑠𝑙𝑖𝑑𝑒
-
-Intern:	mov	%di,%bx
-	mov	$STR,%si
-0:	mov	%bx,%di
-	push	%si
-	lodsb
-	test	%al,%al
-	jne	2f
-	pop	%di
-	push	%di
-	mov	%bx,%si
-4:	lodsb
+1:	mov	%dl,%al
+	cmp	$' ',%al
+	jbe	2f
 	stosb
-	test	%al,%al
-	jnz	4b
-6:	pop	%ax
-	sub	$STR,%ax
-	shl	%ax
-	ret
-1:	lodsb
-2:	scasb
-	jne	5f
-	test	%al,%al
-	jne	1b
-	jmp	6b
-5:	pop	%di
-3:	test	%al,%al
-	jz	0b
-	lodsb
-	jmp	3b
-
-GetList:call	GetToken
-	mov	q.token,%al
+	xchg	%ax,%cx
+2:	call	GetChar				# bh = 0 after PutChar
+	xchg	%ax,%dx				# dl = q.look
+	cmp	$' ',%al
+	jbe	1b
 	cmp	$')',%al
-	je	2f
-	cmp	$'.',%al
-	je	1f
-	call	GetObject
-	push	%ax				# save
-	call	GetList
-	xchg	%ax,%si
-	pop	%di				# restore
-	jmp	Cons
-1:	call	GetToken
-	jmp	GetObject
-2:	xor	%ax,%ax
+	jbe	3f
+	cmp	$')',%dl
+	ja	1b
+3:	movb	%bh,(%di)
+	xchg	%cx,%ax
 	ret
 
-EvalCons:
-	push	%dx				# save
-	mov	2(%bx),%bx
-	mov	%bx,%di
-	call	Cadr
-	xchg	%ax,%di
-	mov	%bp,%si
-	call	Eval
-	mov	%bp,%si
-	pop	%di				# restore
-	push	%ax				# save
-	call	Arg1
-	pop	%si				# restore
-	xchg	%ax,%di
-	pop	%bp
-//	jmp	Cons
-//	𝑠𝑙𝑖𝑑𝑒
-
-Cons:	mov	$q.index,%bx
-	mov	(%bx),%ax
-	addw	$2,(%bx)
-	shl	%ax
-	mov	%ax,%bx
-	mov	%di,(%bx)
-	mov	%si,2(%bx)
-	or	$1,%ax
-	ret
-
-Bind:	test	%di,%di
-	je	1f
-	push	%bp
-	and	$-2,%si
-	and	$-2,%di
-	mov	%di,%bp
-	push	%dx				# save no. 1
-	push	%si				# save no. 2
-	mov	2(%si),%si
-	mov	2(%di),%di
-	call	Bind
-	pop	%si				# rest no. 2
-	mov	(%si),%di
-	pop	%si				# rest no. 1
-	push	%ax				# save no. 3
-	call	Eval
-	mov	%ds:(%bp),%di
-	xchg	%ax,%si
-	call	Cons
-	pop	%si				# rest no. 3
-	xchg	%ax,%di
-	pop	%bp
-	jmp	Cons
-1:	xchg	%dx,%ax
-	ret
-
-PrintString:					# nul-terminated in si
-0:	lodsb					# don't clobber bp, bx
+GetObject:					# called just after GetToken
+	cmpb	$'(',%al
+	je	GetList
+	mov	$q.token,%si
+.Intern:
+	mov	%si,%bx				# save s
+	mov	$q.str,%di
+	xor	%al,%al
+0:	mov	$-1,%cl
+	push	%di				# save 1
+1:	cmpsb
+	jne	2f
+	cmp	-1(%di),%al
+	jne	1b
+	jmp	4f
+2:	pop	%si				# drop 1
+	mov	%bx,%si				# restore s
+	repne scasb
+	cmp	(%di),%al
+	jne	0b
+	push	%di				# StpCpy
+3:	lodsb
+	stosb
 	test	%al,%al
-	je	1f
-	call	PutChar
-	jmp	0b
-1:	ret
+	jnz	3b
+4:	pop	%ax				# restore 1
+	add	$-q.str,%ax			# stc
+	adc	%ax,%ax				# ax = 2 * ax + carry
+.ret:	ret
 
-PutChar:push	%bx				# don't clobber bp,bx,di,si,cx
-	push	%bp				# original ibm pc scroll up bug
+PrintObject:					# PrintObject(x:ax)
+	test	$1,%al
+	xchg	%ax,%di
+	jz	.PrintList
+.PrintAtom:
+	shr	%di
+	lea	q.str(%di),%si
+.PrintString:					# nul-terminated in si
+	lodsb
+	test	%al,%al
+	jz	.ret				# -> ret
+	call	PutChar
+	jmp	.PrintString
+.PrintList:
+	mov	$'(',%al
+2:	push	2(%di)				# save 1 Cdr(x)
+	mov	(%di),%di			# di = Car(x)
+	call	.PutObject
+	pop	%ax				# restore 1
+	cmp	$NIL,%ax
+	je	4f
+	test	$1,%al
+	xchg	%ax,%di
+	mov	$' ',%al
+	jz	2b
+	mov	$249,%al			# bullet (A∙B)
+	call	.PutObject
+4:	mov	$')',%al
+	jmp	PutChar
+.PutObject:					# .PutObject(c:al,x:di)
+	call	PutChar				# preserves di
+	xchg	%di,%ax
+	jmp	PrintObject
+
+GetChar:
+	xor	%ax,%ax				# get keystroke
+	int	$0x16				# keyboard service
+						# ah is bios scancode
+						# al is ascii character
+PutChar:
+#	push	%bx				# don't clobber di,si,cx,dx
+#	push	%bp				# original ibm pc scroll up bug
 	mov	$7,%bx				# normal mda/cga style page zero
 	mov	$0x0e,%ah			# teletype output al cp437
 	int	$0x10				# vidya service
-	pop	%bp				# preserves al
-	pop	%bx
-	ret
+#	pop	%bp				# preserves al
+#	pop	%bx
+	cmp	$'\r',%al			# don't clobber stuff
+	jne	.ret
+	mov	$'\n',%al
+	jmp	PutChar				# bx volatile, bp never used
+
+GetList:call	GetToken
+	cmpb	$')',%al
+	je	.retF
+	call	GetObject
+	push	%ax				# save 1
+	call	GetList
+	xchg	%ax,%si
+	pop	%di				# restore 1
+	jmp	Cons
 
 ////////////////////////////////////////////////////////////////////////////////
-.text
 
-PrintObject:
-	test	$1,%di
-	jnz	1f
-	shr	%di
-	lea	STR(%di),%si
-	jmp	PrintString
-1:	push	%bx
-	mov	%di,%bx
-	mov	$40,%al
-	call	PutChar
-2:	and	$-2,%bx
-	mov	(%bx),%di
-	call	PrintObject
-	mov	2(%bx),%bx
-	test	%bx,%bx
-	jz	4f
-	test	$1,%bl
-	jz	3f
-	mov	$0x20,%al
-	call	PutChar
-	jmp	2b
-3:	mov	$kDot,%si
-	call	PrintString
-	mov	%bx,%di
-	call	PrintObject
-4:	pop	%bx
-	mov	$41,%al
-//	jmp	PutChar
-//	𝑠𝑙𝑖𝑑𝑒
-
-Arg1ds:	mov	%dx,%di
-	mov	%bp,%si
-//	𝑠𝑙𝑖𝑑𝑒
-Arg1:	call	Cadr
-	xchg	%ax,%di
-//	jmp	Eval
-//	𝑠𝑙𝑖𝑑𝑒
-
-Eval:	push	%bp
-	mov	%di,%dx
-	mov	%si,%bp
-0:	test	$1,%dl
-	jne	1f
-	xchg	%bp,%si
-	xchg	%dx,%di
-	pop	%bp
-	jmp	Assoc
-1:	mov	%dx,%bx
-	and	$-2,%bx
-	mov	(%bx),%ax
-	test	$1,%al
+Evlis:	cmp	$NIL,%di			# Evlis(m:di,a:dx):ax
 	je	1f
-	mov	(%bx),%di
-	and	$-2,%di
-	cmpw	$ATOM_LAMBDA,(%di)
-	jne	EvalUndefined
-	mov	2(%bx),%si
-	mov	(%bx),%di
-	push	%bx
-	call	Cadr
-	xchg	%ax,%di
-	mov	%bp,%dx
-	call	Bind
-	xchg	%ax,%bp
-	pop	%bx
-	mov	(%bx),%bx
-	mov	%bx,%di
-	and	$-2,%di
-	mov	2(%di),%di
-	jmp	EvalCadrLoop
-1:	mov	(%bx),%ax
-	cmp	$ATOM_COND,%ax
-	je	EvalCond
-	jg	2f
-	cmp	$ATOM_ATOM,%ax
-	je	EvalAtom
-	jg	1f
-	test	%ax,%ax
-	je	EvalUndefined
-	cmp	$ATOM_QUOTE,%ax
-	jne	EvalCall
-//	𝑠𝑙𝑖𝑑𝑒
-EvalQuote:
-	xchg	%dx,%di
-	pop	%bp
-	jmp	Cadr
-1:	cmp	$ATOM_EQ,%ax
-	jne	EvalCall
-//	𝑠𝑙𝑖𝑑𝑒
-EvalEq:	push	%dx
-	mov	2(%bx),%bx
-	mov	%bx,%di
-	call	Cadr
-	xchg	%ax,%di
-	mov	%bp,%si
+	push	2(%di)				# save 1 Cdr(m)
+	mov	(%di),%ax
+	push	%dx				# save a
 	call	Eval
-	mov	%bp,%si
-	pop	%di				# restore
-	push	%ax				# save
-	call	Arg1
-	pop	%dx				# restore
-	cmp	%dx,%ax
-	jmp	3f
-EvalCdr:
-	push	$2
-	jmp	EvalCarCdr
-EvalUndefined:
-	mov	$UNDEFINED,%ax
-9:	pop	%bp
+	pop	%dx				# restore a
+	pop	%di				# restore 1
+	push	%ax				# save 2
+	call	Evlis
+	xchg	%ax,%si
+	pop	%di				# restore 2
+#	jmp	Cons
+Cons:	xchg	%di,%ax
+	mov	%fs,%di
+	push	%di
+	stosw
+	xchg	%si,%ax
+	stosw
+	mov	%di,%fs
+	pop	%ax
 	ret
-EvalCond:
-	mov	2(%bx),%bx
-	and	$-2,%bx
-	mov	(%bx),%di
-	and	$-2,%di
+1:	xchg	%di,%ax
+	ret
+
+Pairlis:cmp	$NIL,%di			# Pairlis(x:di,y:si,a:dx):ax
+	je	1f
+	push	2(%di)				# save 1 Cdr(x)
+	push	2(%si)				# save 2 Cdr(y)
 	mov	(%di),%di
-	mov	%bp,%si
-	push	%bx				# save
+	mov	(%si),%si
+	call	Cons				# preserves dx
+	pop	%si				# restore 2
+	pop	%di				# restore 1
+	push	%ax				# save 3
+	call	Pairlis
+	xchg	%ax,%si
+	pop	%di				# restore 3
+	jmp	Cons				# can be inlined here
+1:	xchg	%dx,%ax
+	ret
+
+Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
+	jnz	.switch
+	xchg	%ax,%di				# di = fn
+.lambda:mov	2(%di),%di			# di = Cdr(fn)
+	push	%di				# save 1
+	mov	(%di),%di			# di = Cadr(fn)
+	call	Pairlis
+	xchg	%ax,%dx
+	pop	%di				# restore 1
+	jmp	.EvCadr
+.switch:cmp	$ATOM_EQ,%ax
+	ja	.dflt1
+	mov	(%si),%di			# di = Car(x)
+.ifCar:	cmp	$ATOM_CAR,%al
+	jne	.ifCdr
+	mov	(%di),%ax
+	ret
+.ifCdr:	cmp	$ATOM_CDR,%al
+	jne	.ifAtom
+	mov	2(%di),%ax
+	ret
+.ifAtom:cmp	$ATOM_ATOM,%al
+	jne	.ifCons
+	test	$1,%di
+	jnz	.retT
+.retF:	mov	$NIL,%ax			# ax = NIL
+	ret
+.ifCons:mov	2(%si),%si			# si = Cdr(x)
+	mov	(%si),%si			# si = Cadr(x)
+	cmp	$ATOM_CONS,%al
+	je	Cons
+.isEq:	cmp	%di,%si
+	jne	.retF
+.retT:	mov	$ATOM_T,%al			# ax = ATOM_T
+	ret
+.dflt1:	push	%si				# save x
+	push	%dx				# save a
 	call	Eval
-	pop	%bx				# restore
-	test	%ax,%ax
-	je	EvalCond
-	mov	(%bx),%di
-	jmp	EvalCadrLoop
-2:	cmp	$ATOM_CDR,%ax
-	je	EvalCdr
-	cmp	$ATOM_CONS,%ax
-	je	EvalCons
-	cmp	$ATOM_CAR,%ax
-	jne	EvalCall
-//	𝑠𝑙𝑖𝑑𝑒
-EvalCar:
-	push	$0
-//	𝑠𝑙𝑖𝑑𝑒
-EvalCarCdr:
-	call	Arg1ds
-	and	$-2,%ax
-	xchg	%ax,%di
-	pop	%bx
-	mov	(%bx,%di),%ax
-	jmp	9b
-EvalCall:
-	push	2(%bx)
-	mov	(%bx),%di
-	mov	%bp,%si
-	call	Assoc
-	xchg	%ax,%di
-	pop	%si
-	call	Cons
-	jmp	1f
-EvalAtom:
-	call	Arg1ds
-	test	$1,%al
-3:	mov	$ATOM_T,%ax
-	je	9b
-	xor	%ax,%ax
-	jmp	9b
-EvalCadrLoop:
-	call	Cadr
-1:	xchg	%ax,%dx
-	jmp	0b
+	pop	%dx				# restore a
+	pop	%si				# restore x
+	jmp	Apply
 
-////////////////////////////////////////////////////////////////////////////////
-.section .rodata,"a",@progbits
+Eval:	test	$1,%al				# Eval(e:ax,a:dx):ax
+	jnz	Assoc
+	xchg	%ax,%di				# di = e
+	mov	(%di),%ax			# ax = Car(e)
+	cmp	$ATOM_QUOTE,%ax			# maybe CONS
+	je	Cadr
+	mov	2(%di),%di			# di = Cdr(e)
+	cmp	$ATOM_COND,%ax
+	je	Evcon
+.Ldflt2:push	%ax				# save 2
+	call	Evlis				# preserves dx
+	xchg	%ax,%si
+	pop	%ax				# restore 2
+	jmp	Apply
 
-kDot:	.string	" . "
-kCrlf:	.string	"\r\n"
-kSymbols:
-	.string	"NIL"
-	.string	"*UNDEFINED"
-	.string	"T"
-	.string	"QUOTE"
-	.string	"ATOM"
-	.string	"EQ"
-	.string	"COND"
-	.string	"CAR"
-	.string	"CDR"
-	.string	"CONS"
-	.string	"LAMBDA"
+Cadr:	mov	2(%di),%di			# contents of decrement register
+	mov	(%di),%ax			# contents of address register
+	ret
+
+Evcon:	push	%di				# save c
+	mov	(%di),%di			# di = Car(c)
+	mov	(%di),%ax			# ax = Caar(c)
+	push	%dx				# save a
+	call	Eval
+	pop	%dx				# restore a
+	pop	%di				# restore c
+	cmp	$NIL,%ax
+	jne	2f
+	mov	2(%di),%di			# di = Cdr(c)
+	jmp	Evcon
+2:	mov	(%di),%di			# di = Car(c)
+.EvCadr:call	Cadr				# ax = Cadar(c)
+	jmp	Eval
+
+Assoc:	cmp	$NIL,%dx			# Assoc(x:ax,y:dx):ax
+	mov	%dx,%si
+	je	.retF
+	mov	(%si),%bx			# bx = Car(y)
+	mov	(%bx),%cx			# cx = Caar(y)
+	cmp	%cx,%ax
+	jne	1f
+	mov	2(%bx),%ax			# ax = Cdar(y)
+	ret
+1:	mov	2(%si),%dx			# dx = Cdr(y)
+	jmp	Assoc
+
+.type .sig,@object;
+.sig:
+.fill 510 - (. - _start), 1, 0xce
+.word 0xAA55

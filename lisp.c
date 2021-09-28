@@ -18,7 +18,6 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "lisp.h"
 
-#define TRACE  0  // print eval input output
 #define RETRO  1  // auto capitalize input
 #define DELETE 1  // allow backspace to rub out symbol
 #define QUOTES 1  // allow 'X shorthand (QUOTE X)
@@ -30,24 +29,22 @@
 │ The LISP Challenge § LISP Machine                                        ─╬─│┼
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
-#define ATOM 0
-#define CONS 1
+#define ATOM 1
+#define CONS 0
 
-#define NIL         0
-#define UNDEFINED   8
-#define ATOM_T      30
-#define ATOM_QUOTE  34
-#define ATOM_ATOM   46
-#define ATOM_EQ     56
-#define ATOM_COND   62
-#define ATOM_CAR    72
-#define ATOM_CDR    80
-#define ATOM_CONS   88
-#define ATOM_LAMBDA 98
+#define NIL         (ATOM | 0)
+#define UNDEFINED   (ATOM | 8)
+#define ATOM_T      (ATOM | 30)
+#define ATOM_QUOTE  (ATOM | 34)
+#define ATOM_COND   (ATOM | 46)
+#define ATOM_ATOM   (ATOM | 56)
+#define ATOM_CAR    (ATOM | 66)
+#define ATOM_CDR    (ATOM | 74)
+#define ATOM_CONS   (ATOM | 82)
+#define ATOM_EQ     (ATOM | 92)
+#define ATOM_LAMBDA (ATOM | 98)
 
-#define BOOL(x)  ((x) ? ATOM_T : NIL)
 #define VALUE(x) ((x) >> 1)
-#define PTR(i)   ((i) << 1 | CONS)
 
 struct Lisp {
   WORD mem[WORDS];
@@ -66,12 +63,12 @@ _Alignas(char) const char kSymbols[] = "NIL\0"
                                        "*UNDEFINED\0"
                                        "T\0"
                                        "QUOTE\0"
-                                       "ATOM\0"
-                                       "EQ\0"
                                        "COND\0"
+                                       "ATOM\0"
                                        "CAR\0"
                                        "CDR\0"
                                        "CONS\0"
+                                       "EQ\0"
                                        "LAMBDA";
 
 #ifdef __REAL_MODE__
@@ -84,7 +81,7 @@ static void Print(long);
 static WORD GetList(void);
 static WORD GetObject(void);
 static void PrintObject(long);
-static WORD Eval(long, long);
+static WORD Eval(WORD, WORD);
 
 static void SetupSyntax(void) {
   unsigned char *syntax = q->syntax;
@@ -327,14 +324,6 @@ static void Print(long i) {
 │ The LISP Challenge § Bootstrap John McCarthy's Metacircular Evaluator    ─╬─│┼
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
-static WORD Atom(long x) {
-  return BOOL(ISATOM(x));
-}
-
-static WORD Eq(long x, long y) {
-  return BOOL(x == y);
-}
-
 static WORD Caar(long x) {
   return Car(Car(x));  // ((A B C D) (E F G) H I) → A
 }
@@ -355,75 +344,75 @@ static WORD Caddar(long x) {
   return Caddr(Car(x));  // ((A B C D) (E F G) H I) → C
 }
 
-static WORD Arg1(long e, long a) {
-  return Eval(Cadr(e), a);
-}
-
-static WORD Arg2(long e, long a) {
-  return Eval(Caddr(e), a);
-}
-
-static WORD Append(long x, long y) {
-  return x ? Cons(Car(x), Append(Cdr(x), y)) : y;
-}
-
 static WORD Evcon(long c, long a) {
-  return Eval(Caar(c), a) ? Eval(Cadar(c), a) : Evcon(Cdr(c), a);
+  return Eval(Caar(c), a) != NIL ? Eval(Cadar(c), a) : Evcon(Cdr(c), a);
 }
 
-static WORD Bind(long v, long a, long e) { // evlis + pair w/ dot notation
-  return v ? Cons(Cons(Car(v), Eval(Car(a), e)), Bind(Cdr(v), Cdr(a), e)) : e;
+static WORD Assoc(long x, long a) {
+  return a != NIL ? Caar(a) == x ? Cdar(a) : Assoc(x, Cdr(a)) : NIL;
 }
 
-static WORD Assoc(long x, long y) {
-  return y ? Eq(Caar(y), x) ? Cdar(y) : Assoc(x, Cdr(y)) : NIL;
+static WORD Pairlis(WORD x, WORD y, WORD a) {
+  if (x == NIL)
+    return a;
+  WORD di = Cons(Car(x), Car(y));
+  WORD si = Pairlis(Cdr(x), Cdr(y), a);
+  return Cons(di, si); // Tail-Modulo-Cons
 }
 
-static WORD Evaluate(long e, long a) {
-  if (Atom(e)) {
-    return Assoc(e, a);
-  } else if (Atom(Car(e))) {
-    switch (Car(e)) {
-      case NIL:
-        return UNDEFINED;
-      case ATOM_QUOTE:
-        return Cadr(e);
-      case ATOM_ATOM:
-        return Atom(Arg1(e, a));
-      case ATOM_EQ:
-        return Eq(Arg1(e, a), Arg2(e, a));
-      case ATOM_COND:
-        return Evcon(Cdr(e), a);
-      case ATOM_CAR:
-        return Car(Arg1(e, a));
-      case ATOM_CDR:
-        return Cdr(Arg1(e, a));
-      case ATOM_CONS:
-        return Cons(Arg1(e, a), Arg2(e, a));
-      default:
-        return Eval(Cons(Assoc(Car(e), a), Cdr(e)), a);
+static WORD Evlis(WORD m, WORD a) {
+  if (m == NIL)
+    return NIL;
+  WORD di = Eval(Car(m), a);
+  WORD si = Evlis(Cdr(m), a);
+  return Cons(di, si);
+}
+
+static WORD Apply(WORD fn, WORD x, WORD a) {
+  if (ISATOM(fn)) {
+    switch (fn) {
+    case NIL:
+      return UNDEFINED;
+    case ATOM_CAR:
+      return Caar(x);
+    case ATOM_CDR:
+      return Cdar(x);
+    case ATOM_ATOM:
+      return ISATOM(Car(x)) ? ATOM_T : NIL;
+    case ATOM_CONS:
+      return Cons(Car(x), Cadr(x));
+    case ATOM_EQ:
+      return Car(x) == Cadr(x) ? ATOM_T : NIL;
+    default:
+      return Apply(Eval(fn, a), x, a);
     }
-  } else if (Eq(Caar(e), ATOM_LAMBDA)) {
-    return Eval(Caddar(e), Bind(Cadar(e), Cdr(e), a));
-  } else {
-    return UNDEFINED;
   }
+
+  if (Car(fn) == ATOM_LAMBDA) {
+    WORD t1 = Cdr(fn);
+    WORD si = Pairlis(Car(t1), x, a);
+    WORD ax = Cadr(t1);
+    return Eval(ax, si);
+  }
+
+  return UNDEFINED;
 }
 
-static WORD Eval(long e, long a) {
-  WORD r;
-#if TRACE
-  PrintString("->");
-  Print(e);
-  PrintString("  ");
-  Print(a);
-#endif
-  e = Evaluate(e, a);
-#if TRACE
-  PrintString("<-");
-  Print(e);
-#endif
-  return e;
+static WORD Eval(WORD e, WORD a) {
+  if (ISATOM(e))
+    return Assoc(e, a);
+
+  WORD ax = Car(e);
+  if (ISATOM(ax)) {
+    if (ax == ATOM_QUOTE)
+      return Cadr(e);
+    if (ax == ATOM_COND)
+      return Evcon(Cdr(e), a);
+    if (ax == ATOM_LAMBDA)
+      return e;
+  }
+
+  return Apply(ax, Evlis(Cdr(e), a), a);
 }
 
 /*───────────────────────────────────────────────────────────────────────────│─╗
