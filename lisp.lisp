@@ -23,8 +23,9 @@
 ;;
 ;; Listed Projects
 ;;
-;; - 836 bytes: https://github.com/jart/sectorlisp
+;; - 512 bytes: https://github.com/jart/sectorlisp
 ;; - 13 kilobytes: https://t3x.org/klisp/
+;; - 47 kilobytes: https://github.com/matp/tiny-lisp
 ;; - 150 kilobytes: https://github.com/JeffBezanson/femtolisp
 ;; - Send pull request to be listed here
 ;;
@@ -72,6 +73,7 @@ NIL
 ;; CORRECT RESULT OF EXPRESSION IS STILL `A`
 ;; REQUIRES CONS CAR CDR QUOTE ATOM EQ LAMBDA COND
 ;; SIMPLIFIED BUG FIXED VERSION OF JOHN MCCARTHY PAPER
+;; NOTE: ((EQ (CAR E) NIL) (QUOTE *UNDEFINED)) CAN HELP
 ((LAMBDA (ASSOC EVCON BIND APPEND EVAL)
    (EVAL (QUOTE ((LAMBDA (FF X) (FF X))
                  (QUOTE (LAMBDA (X)
@@ -98,7 +100,6 @@ NIL
             ((ATOM E) (ASSOC E A))
             ((ATOM (CAR E))
              (COND
-               ((EQ (CAR E) NIL) (QUOTE *UNDEFINED))
                ((EQ (CAR E) (QUOTE QUOTE)) (CAR (CDR E)))
                ((EQ (CAR E) (QUOTE ATOM)) (ATOM (EVAL (CAR (CDR E)) A)))
                ((EQ (CAR E) (QUOTE EQ)) (EQ (EVAL (CAR (CDR E)) A)

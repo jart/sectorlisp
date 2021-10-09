@@ -16,110 +16,109 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "lisp.h"
+#include "bestline.h"
 
-#define RETRO  1  // auto capitalize input
-#define DELETE 1  // allow backspace to rub out symbol
-#define QUOTES 1  // allow 'X shorthand (QUOTE X)
-#define PROMPT 1  // show repl prompt
-#define WORD   short
-#define WORDS  8192
+#ifndef __COSMOPOLITAN__
+#include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#endif
+
+#define QUOTES 1     /* allow 'X shorthand for (QUOTE X) */
+#define FUNDEF 1     /* be friendly w/undefined behavior */
+#define TRACE  0     /* prints Eval() arguments / result */
 
 /*───────────────────────────────────────────────────────────────────────────│─╗
 │ The LISP Challenge § LISP Machine                                        ─╬─│┼
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
-#define ATOM 1
-#define CONS 0
+#define ATOM 0
+#define CONS 1
 
-#define NIL         (ATOM | 0)
-#define UNDEFINED   (ATOM | 8)
-#define ATOM_T      (ATOM | 30)
-#define ATOM_QUOTE  (ATOM | 34)
-#define ATOM_COND   (ATOM | 46)
-#define ATOM_ATOM   (ATOM | 56)
-#define ATOM_CAR    (ATOM | 66)
-#define ATOM_CDR    (ATOM | 74)
-#define ATOM_CONS   (ATOM | 82)
-#define ATOM_EQ     (ATOM | 92)
-#define ATOM_LAMBDA (ATOM | 98)
+#define ISATOM(x)   (~(x)&1)
+#define VALUE(x)    ((x)>>1)
+#define OBJECT(t,v) ((v)<<1|(t))
 
-#define VALUE(x) ((x) >> 1)
+#define NIL         OBJECT(ATOM,0)
+#define ATOM_T      OBJECT(ATOM,4)
+#define ATOM_QUOTE  OBJECT(ATOM,6)
+#define ATOM_COND   OBJECT(ATOM,12)
+#define ATOM_ATOM   OBJECT(ATOM,17)
+#define ATOM_CAR    OBJECT(ATOM,22)
+#define ATOM_CDR    OBJECT(ATOM,26)
+#define ATOM_CONS   OBJECT(ATOM,30)
+#define ATOM_EQ     OBJECT(ATOM,35)
+#define ATOM_LAMBDA OBJECT(ATOM,38)
+#define UNDEFINED   OBJECT(ATOM,45)
 
 struct Lisp {
-  WORD mem[WORDS];
+  int mem[8192];
   unsigned char syntax[256];
-  WORD look;
-  WORD globals;
-  WORD index;
+  int look;
+  int globals;
+  int index;
   char token[128];
-  char str[WORDS];
+  char str[8192];
 };
 
-_Static_assert(sizeof(struct Lisp) <= 0x7c00 - 0x600,
-               "LISP Machine too large for real mode");
-
-_Alignas(char) const char kSymbols[] = "NIL\0"
-                                       "*UNDEFINED\0"
-                                       "T\0"
-                                       "QUOTE\0"
-                                       "COND\0"
-                                       "ATOM\0"
-                                       "CAR\0"
-                                       "CDR\0"
-                                       "CONS\0"
-                                       "EQ\0"
-                                       "LAMBDA";
-
-#ifdef __REAL_MODE__
-static struct Lisp *const q;
-#else
-static struct Lisp q[1];
+static const char kSymbols[] =
+    "NIL\0"
+    "T\0"
+    "QUOTE\0"
+    "COND\0"
+    "ATOM\0"
+    "CAR\0"
+    "CDR\0"
+    "CONS\0"
+    "EQ\0"
+    "LAMBDA\0"
+#if FUNDEF
+    "*UNDEFINED"
 #endif
+;
 
-static void Print(long);
-static WORD GetList(void);
-static WORD GetObject(void);
-static void PrintObject(long);
-static WORD Eval(WORD, WORD);
+static struct Lisp q[1];
+
+static void Print(int);
+static int GetList(void);
+static int GetObject(void);
+static void PrintObject(int);
+static int Eval(int, int);
 
 static void SetupSyntax(void) {
-  unsigned char *syntax = q->syntax;
-  asm("" : "+bSD"(syntax));
-  syntax[' '] = ' ';
-  syntax['\r'] = ' ';
-  syntax['\n'] = ' ';
-  syntax['('] = '(';
-  syntax[')'] = ')';
-  syntax['.'] = '.';
-#if QUOTES
-  syntax['\''] = '\'';
-#endif
+  q->syntax[' '] = ' ';
+  q->syntax['\r'] = ' ';
+  q->syntax['\n'] = ' ';
+  q->syntax['('] = '(';
+  q->syntax[')'] = ')';
+  q->syntax['.'] = '.';
+  q->syntax['\''] = '\'';
 }
 
 static void SetupBuiltins(void) {
-  CopyMemory(q->str, kSymbols, sizeof(kSymbols));
+  memmove(q->str, kSymbols, sizeof(kSymbols));
 }
 
-static inline WORD Car(long x) {
-  return PEEK_ARRAY(q, mem, VALUE(x), 0);
+static inline int Car(int x) {
+  return q->mem[VALUE(x) + 0];
 }
 
-static inline WORD Cdr(long x) {
-  return PEEK_ARRAY(q, mem, VALUE(x), 1);
+static inline int Cdr(int x) {
+  return q->mem[VALUE(x) + 1];
 }
 
-static WORD Set(long i, long k, long v) {
-  POKE_ARRAY(q, mem, VALUE(i), 0, k);
-  POKE_ARRAY(q, mem, VALUE(i), 1, v);
+static int Set(int i, int k, int v) {
+  q->mem[VALUE(i) + 0] = k;
+  q->mem[VALUE(i) + 1] = v;
   return i;
 }
 
-static WORD Cons(WORD car, WORD cdr) {
+static int Cons(int car, int cdr) {
   int i, cell;
   i = q->index;
-  POKE_ARRAY(q, mem, i, 0, car);
-  POKE_ARRAY(q, mem, i, 1, cdr);
+  q->mem[i + 0] = car;
+  q->mem[i + 1] = cdr;
   q->index = i + 2;
   cell = OBJECT(CONS, i);
   return cell;
@@ -128,120 +127,116 @@ static WORD Cons(WORD car, WORD cdr) {
 static char *StpCpy(char *d, char *s) {
   char c;
   do {
-    c = LODS(s);  // a.k.a. c = *s++
-    STOS(d, c);   // a.k.a. *d++ = c
+    c = *s++;
+    *d++ = c;
   } while (c);
   return d;
 }
 
-static WORD Intern(char *s) {
+static int Intern(char *s) {
   int j, cx;
   char c, *z, *t;
   z = q->str;
-  c = LODS(z);
+  c = *z++;
   while (c) {
     for (j = 0;; ++j) {
-      if (c != PEEK(s, j, 0)) {
+      if (c != s[j]) {
         break;
       }
       if (!c) {
         return OBJECT(ATOM, z - q->str - j - 1);
       }
-      c = LODS(z);
+      c = *z++;
     }
-    while (c) c = LODS(z);
-    c = LODS(z);
+    while (c) c = *z++;
+    c = *z++;
   }
   --z;
   StpCpy(z, s);
-  return OBJECT(ATOM, SUB((long)z, q->str));
+  return OBJECT(ATOM, z - q->str);
 }
 
-static unsigned char XlatSyntax(unsigned char b) {
-  return PEEK_ARRAY(q, syntax, b, 0);
+static void PrintChar(unsigned char b) {
+  if (write(1, &b, 1) == -1) exit(1);
 }
 
 static void PrintString(char *s) {
   char c;
   for (;;) {
-    if (!(c = PEEK(s, 0, 0))) break;
+    if (!(c = s[0])) break;
     PrintChar(c);
     ++s;
   }
 }
 
 static int GetChar(void) {
-  int c;
-  c = ReadChar();
-#if RETRO
-  if (c >= 'a') {
-    CompilerBarrier();
-    if (c <= 'z') c -= 'a' - 'A';
+  unsigned char b;
+  static char *l, *p;
+  if (l || (l = p = bestlineWithHistory("* ", "sectorlisp"))) {
+    if (*p) {
+      b = *p++;
+    } else {
+      free(l);
+      l = p = 0;
+      b = '\n';
+    }
+    return b;
+  } else {
+    PrintChar('\n');
+    exit(0);
   }
-#endif
-#if DELETE
-  if (c == '\b') return c;
-#endif
-  PrintChar(c);
-  if (c == '\r') PrintChar('\n');
-  return c;
 }
 
 static void GetToken(void) {
   char *t;
-  unsigned char b, x;
+  int b, x;
   b = q->look;
   t = q->token;
   for (;;) {
-    x = XlatSyntax(b);
+    x = q->syntax[b];
     if (x != ' ') break;
     b = GetChar();
   }
   if (x) {
-    STOS(t, b);
+    *t++ = b;
     b = GetChar();
   } else {
     while (b && !x) {
-      if (!DELETE || b != '\b') {
-        STOS(t, b);
-      } else if (t > q->token) {
-        PrintString("\b \b");
-        if (t > q->token) --t;
-      }
+      *t++ = b;
       b = GetChar();
-      x = XlatSyntax(b);
+      x = q->syntax[b];
     }
   }
-  STOS(t, 0);
+  *t++ = 0;
   q->look = b;
 }
 
-static WORD ConsumeObject(void) {
+static int ConsumeObject(void) {
   GetToken();
   return GetObject();
 }
 
-static WORD Cadr(long x) {
-  return Car(Cdr(x));  // ((A B C D) (E F G) H I) → (E F G)
+static int Cadr(int x) {
+  return Car(Cdr(x));  /* ((A B C D) (E F G) H I) → (E F G) */
 }
 
-static WORD List(long x, long y) {
+static int List(int x, int y) {
   return Cons(x, Cons(y, NIL));
 }
 
-static WORD Quote(long x) {
+static int Quote(int x) {
   return List(ATOM_QUOTE, x);
 }
 
-static WORD GetQuote(void) {
+static int GetQuote(void) {
   return Quote(ConsumeObject());
 }
 
-static WORD AddList(WORD x) {
+static int AddList(int x) {
   return Cons(x, GetList());
 }
 
-static WORD GetList(void) {
+static int GetList(void) {
   GetToken();
   switch (*q->token & 0xFF) {
     default:
@@ -257,7 +252,7 @@ static WORD GetList(void) {
   }
 }
 
-static WORD GetObject(void) {
+static int GetObject(void) {
   switch (*q->token & 0xFF) {
     default:
       return Intern(q->token);
@@ -270,21 +265,21 @@ static WORD GetObject(void) {
   }
 }
 
-static WORD ReadObject(void) {
+static int ReadObject(void) {
   q->look = GetChar();
   GetToken();
   return GetObject();
 }
 
-static WORD Read(void) {
+static int Read(void) {
   return ReadObject();
 }
 
-static void PrintAtom(long x) {
+static void PrintAtom(int x) {
   PrintString(q->str + VALUE(x));
 }
 
-static void PrintList(long x) {
+static void PrintList(int x) {
 #if QUOTES
   if (Car(x) == ATOM_QUOTE) {
     PrintChar('\'');
@@ -307,7 +302,7 @@ static void PrintList(long x) {
   PrintChar(')');
 }
 
-static void PrintObject(long x) {
+static void PrintObject(int x) {
   if (ISATOM(x)) {
     PrintAtom(x);
   } else {
@@ -315,7 +310,7 @@ static void PrintObject(long x) {
   }
 }
 
-static void Print(long i) {
+static void Print(int i) {
   PrintObject(i);
   PrintString("\r\n");
 }
@@ -324,55 +319,58 @@ static void Print(long i) {
 │ The LISP Challenge § Bootstrap John McCarthy's Metacircular Evaluator    ─╬─│┼
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
-static WORD Caar(long x) {
-  return Car(Car(x));  // ((A B C D) (E F G) H I) → A
+static int Caar(int x) {
+  return Car(Car(x));  /* ((A B C D) (E F G) H I) → A */
 }
 
-static WORD Cdar(long x) {
-  return Cdr(Car(x));  // ((A B C D) (E F G) H I) → (B C D)
+static int Cdar(int x) {
+  return Cdr(Car(x));  /* ((A B C D) (E F G) H I) → (B C D) */
 }
 
-static WORD Cadar(long x) {
-  return Cadr(Car(x));  // ((A B C D) (E F G) H I) → B
+static int Cadar(int x) {
+  return Cadr(Car(x));  /* ((A B C D) (E F G) H I) → B */
 }
 
-static WORD Caddr(long x) {
-  return Cadr(Cdr(x));  // ((A B C D) (E F G) H I) → H
+static int Caddr(int x) {
+  return Cadr(Cdr(x));  /* ((A B C D) (E F G) H I) → H */
 }
 
-static WORD Caddar(long x) {
-  return Caddr(Car(x));  // ((A B C D) (E F G) H I) → C
+static int Caddar(int x) {
+  return Caddr(Car(x));  /* ((A B C D) (E F G) H I) → C */
 }
 
-static WORD Evcon(long c, long a) {
+static int Evcon(int c, int a) {
   return Eval(Caar(c), a) != NIL ? Eval(Cadar(c), a) : Evcon(Cdr(c), a);
 }
 
-static WORD Assoc(long x, long a) {
-  return a != NIL ? Caar(a) == x ? Cdar(a) : Assoc(x, Cdr(a)) : NIL;
+static int Assoc(int x, int a) {
+  return a ? Caar(a) == x ? Cdar(a) : Assoc(x, Cdr(a)) : NIL;
 }
 
-static WORD Pairlis(WORD x, WORD y, WORD a) {
-  if (x == NIL)
-    return a;
-  WORD di = Cons(Car(x), Car(y));
-  WORD si = Pairlis(Cdr(x), Cdr(y), a);
-  return Cons(di, si); // Tail-Modulo-Cons
+static int Pairlis(int x, int y, int a) {  /* it's zip() basically */
+  int di, si;
+  if (!x) return a;
+  di = Cons(Car(x), Car(y));
+  si = Pairlis(Cdr(x), Cdr(y), a);
+  return Cons(di, si); /* Tail-Modulo-Cons */
 }
 
-static WORD Evlis(WORD m, WORD a) {
-  if (m == NIL)
-    return NIL;
-  WORD di = Eval(Car(m), a);
-  WORD si = Evlis(Cdr(m), a);
+static int Evlis(int m, int a) {
+  int di, si;
+  if (!m) return NIL;
+  di = Eval(Car(m), a);
+  si = Evlis(Cdr(m), a);
   return Cons(di, si);
 }
 
-static WORD Apply(WORD fn, WORD x, WORD a) {
+static int Apply(int fn, int x, int a) {
+  int t1, si, ax;
   if (ISATOM(fn)) {
     switch (fn) {
+#if FUNDEF
     case NIL:
       return UNDEFINED;
+#endif
     case ATOM_CAR:
       return Caar(x);
     case ATOM_CDR:
@@ -387,22 +385,20 @@ static WORD Apply(WORD fn, WORD x, WORD a) {
       return Apply(Eval(fn, a), x, a);
     }
   }
-
   if (Car(fn) == ATOM_LAMBDA) {
-    WORD t1 = Cdr(fn);
-    WORD si = Pairlis(Car(t1), x, a);
-    WORD ax = Cadr(t1);
+    t1 = Cdr(fn);
+    si = Pairlis(Car(t1), x, a);
+    ax = Cadr(t1);
     return Eval(ax, si);
   }
-
   return UNDEFINED;
 }
 
-static WORD Eval(WORD e, WORD a) {
+static int Evaluate(int e, int a) {
+  int ax;
   if (ISATOM(e))
     return Assoc(e, a);
-
-  WORD ax = Car(e);
+  ax = Car(e);
   if (ISATOM(ax)) {
     if (ax == ATOM_QUOTE)
       return Cadr(e);
@@ -411,8 +407,25 @@ static WORD Eval(WORD e, WORD a) {
     if (ax == ATOM_LAMBDA)
       return e;
   }
-
   return Apply(ax, Evlis(Cdr(e), a), a);
+}
+
+static int Eval(int e, int a) {
+  int ax;
+#if TRACE
+  PrintString("> ");
+  PrintObject(e);
+  PrintString("\r\n  ");
+  PrintObject(a);
+  PrintString("\r\n");
+#endif
+  ax = Evaluate(e, a);
+#if TRACE
+  PrintString("< ");
+  PrintObject(ax);
+  PrintString("\r\n");
+#endif
+  return ax;
 }
 
 /*───────────────────────────────────────────────────────────────────────────│─╗
@@ -421,21 +434,15 @@ static WORD Eval(WORD e, WORD a) {
 
 void Repl(void) {
   for (;;) {
-#if PROMPT
-    PrintString("* ");
-#endif
     Print(Eval(Read(), q->globals));
   }
 }
 
 int main(int argc, char *argv[]) {
-  RawMode();
   SetupSyntax();
   SetupBuiltins();
-#if PROMPT
+  bestlineSetXlatCallback(bestlineUppercase);
   PrintString("THE LISP CHALLENGE V1\r\n"
               "VISIT GITHUB.COM/JART\r\n");
-#endif
   Repl();
-  return 0;
 }

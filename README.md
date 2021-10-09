@@ -1,37 +1,71 @@
 # sectorlisp
 
-sectorlisp is an effort to bootstrap John McCarthy's meta-circular
-evaluator on bare metal from a 512-byte boot sector.
+sectorlisp is a 512-byte implementation of LISP that's able to bootstrap
+John McCarthy's meta-circular evaluator on bare metal.
 
 ![Yo dawg, I heard you like LISP so I put a LISP in your LISP so you can eval while you eval](bin/yodawg.png)
 
-## Motivations
+## Overview
 
-Much of the information about LISP online tends to focus on
-[wild macros](http://www.paulgraham.com/onlisp.html),
-[JIT compilation](http://pixielang.org/), or its merits as
-[a better XML](http://www.defmacro.org/ramblings/lisp.html)
-as well as [a better JSON](https://stopa.io/post/265). However
-there's been comparatively little focus on the
-[primary materials](https://people.cs.umass.edu/~emery/classes/cmpsci691st/readings/PL/LISP.pdf)
-from the 1950's which emphasize the radically simple nature of
-LISP, as best evidenced by the meta-circular evaluator above.
+LISP has been described as the [Maxwell's equations of
+software](https://michaelnielsen.org/ddi/lisp-as-the-maxwells-equations-of-software/).
+Yet there's been very little focus to date on reducing these equations
+to their simplest possible form. Even the [original LISP
+paper](https://people.cs.umass.edu/~emery/classes/cmpsci691st/readings/PL/LISP.pdf)
+from the 1960's defines LISP with nonessential elements, e.g. `LABEL`.
+
+This project aims to solve that by doing three things:
+
+1. We provide a LISP implementation that's written in LISP, as a single
+   pure expression, using only the essential functions of the language.
+   See [lisp.lisp](lisp.lisp). It's the same meta-circular evaluator in
+   John McCarthy's paper from the 1960's, except with its bugs fixed,
+   dependencies included, and syntactic sugar removed.
+
+2. We provide a readable portable C reference implementation to show how
+   the meta-circular evaluator can be natively bootstrapped on POSIX
+   conforming platforms, with a pleasant readline-like interface. See
+   [lisp.c](lisp.c).
+
+2. We provide a 512-byte i8086 implementation of LISP that boots from
+   BIOS on personal computers. See [sectorlisp.S](sectorlisp.S). To the
+   best of our knowledge, this is the tiniest true LISP implementation
+   to date.
 
 <p align="center">
-  <img alt="Binary Footprint Comparison"
-       width="750" height="348" src="bin/footprint.png">
+  <img alt="Binary Footprint Comparison" src="bin/footprint.png">
 </p>
 
-This project aims to promote the radical simplicity of the essential
-elements of LISP's original design, by building the tiniest LISP machine
-possible. With a binary footprint less than one kilobyte, that's capable
-of running natively without dependencies on modern PCs, sectorlisp might
-be the tiniest self-hosting LISP interpreter to date. 
+## Getting Started
 
-We're still far off however from reaching our goal, which is to have
-sectorlisp be small enough to fit in the master boot record of a floppy
-disk, like [sectorforth](https://github.com/cesarblum/sectorforth). If
-you can help this project reach its goal, please send us a pull request!
+See [lisp.lisp](lisp.lisp) for code examples that you can copy and paste
+into your LISP REPL.
+
+You can run the C implementation as follows:
+
+```sh
+$ make
+$ ./lisp
+```
+
+After running `make` you should see a `sectorlisp.bin` file, which is a
+master boot record you can put on a flopy disk and boot from BIOS. If
+you would prefer to run it in an emulator, we recommend using
+[Das Blinkenlights](https://justine.lol/blinkenlights/).
+
+```sh
+curl --compressed https://justine.lol/blinkenlights/blinkenlights-latest.com >blinkenlights.com
+chmod +x blinkenlights.com
+./blinkenlights.com -rt sectorlisp.bin
+```
+
+Alternatively you may use QEMU as follows:
+
+```sh
+qemu-system-i386 -nographic -fda sectorlisp.bin
+```
+
+Further information may be found on [our wiki](https://github.com/jart/sectorlisp/wiki).
 
 ## Demo
 
