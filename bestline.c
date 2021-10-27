@@ -51,7 +51,6 @@
 │                                                                              │
 │ SHORTCUTS                                                                    │
 │                                                                              │
-│                                                                              │
 │   CTRL-E         END                                                         │
 │   CTRL-A         START                                                       │
 │   CTRL-B         BACK                                                        │
@@ -78,6 +77,7 @@
 │   ALT-D          KILL WORD FORWARDS                                          │
 │   CTRL-Y         YANK                                                        │
 │   ALT-Y          ROTATE KILL RING AND YANK AGAIN                             │
+│   ALT-\          SQUEEZE ADJACENT WHITESPACE                                 │
 │   CTRL-T         TRANSPOSE                                                   │
 │   ALT-T          TRANSPOSE WORD                                              │
 │   ALT-U          UPPERCASE WORD                                              │
@@ -1762,8 +1762,6 @@ static size_t GetMonospaceWidth(const char *p, size_t n, char *out_haswides) {
                 case '_':
                     t = kStr;
                     break;
-                case '\\':
-                    goto Whoopsie;
                 default:
                     t = kAscii;
                     break;

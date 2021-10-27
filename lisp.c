@@ -404,8 +404,6 @@ static int Evaluate(int e, int a) {
       return Cadr(e);
     if (ax == ATOM_COND)
       return Evcon(Cdr(e), a);
-    if (ax == ATOM_LAMBDA)
-      return e;
   }
   return Apply(ax, Evlis(Cdr(e), a), a);
 }

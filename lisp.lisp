@@ -74,6 +74,7 @@ NIL
 ;; REQUIRES CONS CAR CDR QUOTE ATOM EQ LAMBDA COND
 ;; SIMPLIFIED BUG FIXED VERSION OF JOHN MCCARTHY PAPER
 ;; NOTE: ((EQ (CAR E) NIL) (QUOTE *UNDEFINED)) CAN HELP
+;; NOTE: ((EQ (CAR E) (QUOTE LAMBDA)) E) IS NICE
 ((LAMBDA (ASSOC EVCON BIND APPEND EVAL)
    (EVAL (QUOTE ((LAMBDA (FF X) (FF X))
                  (QUOTE (LAMBDA (X)
@@ -109,7 +110,6 @@ NIL
                ((EQ (CAR E) (QUOTE CONS)) (CONS (EVAL (CAR (CDR E)) A)
                                                 (EVAL (CAR (CDR (CDR E))) A)))
                ((EQ (CAR E) (QUOTE COND)) (EVCON (CDR E) A))
-               ((EQ (CAR E) (QUOTE LAMBDA)) E)
                ((QUOTE T) (EVAL (CONS (EVAL (CAR E) A) (CDR E)) A))))
             ((EQ (CAR (CAR E)) (QUOTE LAMBDA))
              (EVAL (CAR (CDR (CDR (CAR E))))
