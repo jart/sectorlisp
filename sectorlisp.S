@@ -30,8 +30,8 @@
 .set ATOM_CONS,		61
 .set ATOM_EQ,		71
 
-.set q.token,	0x4000
-.set q.str,	0x4080
+.set g_token,	0x4000
+.set g_str,	0x4080
 .set boot,	0x7c00
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -56,10 +56,10 @@ _begin:	push	%cs				# memory model cs=ds=es = 0x600
 	mov	%cx,%sp
 	cld
 	xor	%ax,%ax
-	mov	%ax,%fs				# fs = &q.mem
+	mov	%ax,%fs				# fs = &g_mem
 	xor	%di,%di
 	rep stosb				# clears our bss memory
-main:	mov	$q.str,%di
+main:	mov	$g_str,%di
 	mov	$kSymbols,%si
 	mov	$37,%cx
 	rep movsb
@@ -73,15 +73,15 @@ main:	mov	$q.str,%di
 	call	PutChar
 	jmp	0b
 
-GetToken:					# GetToken():al, dl is q.look
-	mov	$q.token,%di
+GetToken:					# GetToken():al, dl is g_look
+	mov	$g_token,%di
 1:	mov	%dl,%al
 	cmp	$' ',%al
 	jbe	2f
 	stosb
 	xchg	%ax,%cx
 2:	call	GetChar				# bh = 0 after PutChar
-	xchg	%ax,%dx				# dl = q.look
+	xchg	%ax,%dx				# dl = g_look
 	cmp	$' ',%al
 	jbe	1b
 	cmp	$')',%al
@@ -95,10 +95,10 @@ GetToken:					# GetToken():al, dl is q.look
 GetObject:					# called just after GetToken
 	cmpb	$'(',%al
 	je	GetList
-	mov	$q.token,%si
+	mov	$g_token,%si
 .Intern:
 	mov	%si,%bx				# save s
-	mov	$q.str,%di
+	mov	$g_str,%di
 	xor	%al,%al
 0:	mov	$-1,%cl
 	push	%di				# save 1
@@ -118,7 +118,7 @@ GetObject:					# called just after GetToken
 	test	%al,%al
 	jnz	3b
 4:	pop	%ax				# restore 1
-	add	$-q.str,%ax			# stc
+	add	$-g_str,%ax			# stc
 	adc	%ax,%ax				# ax = 2 * ax + carry
 .ret:	ret
 
@@ -128,7 +128,7 @@ PrintObject:					# PrintObject(x:ax)
 	jz	.PrintList
 .PrintAtom:
 	shr	%di
-	lea	q.str(%di),%si
+	lea	g_str(%di),%si
 .PrintString:					# nul-terminated in si
 	lodsb
 	test	%al,%al

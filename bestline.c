@@ -58,6 +58,7 @@
 │   CTRL-L         CLEAR                                                       │
 │   CTRL-H         BACKSPACE                                                   │
 │   CTRL-D         DELETE                                                      │
+│   CTRL-Y         YANK                                                        │
 │   CTRL-D         EOF (IF EMPTY)                                              │
 │   CTRL-N         NEXT HISTORY                                                │
 │   CTRL-P         PREVIOUS HISTORY                                            │
@@ -69,13 +70,17 @@
 │   ALT-B          BACKWARD WORD                                               │
 │   CTRL-ALT-F     FORWARD EXPR                                                │
 │   CTRL-ALT-B     BACKWARD EXPR                                               │
+│   ALT-RIGHT      FORWARD EXPR                                                │
+│   ALT-LEFT       BACKWARD EXPR                                               │
+│   ALT-SHIFT-B    BARF EXPR                                                   │
+│   ALT-SHIFT-S    SLURP EXPR                                                  │
+│   ALT-SHIFT-R    RAISE EXPR                                                  │
 │   CTRL-K         KILL LINE FORWARDS                                          │
 │   CTRL-U         KILL LINE BACKWARDS                                         │
 │   ALT-H          KILL WORD BACKWARDS                                         │
 │   CTRL-W         KILL WORD BACKWARDS                                         │
 │   CTRL-ALT-H     KILL WORD BACKWARDS                                         │
 │   ALT-D          KILL WORD FORWARDS                                          │
-│   CTRL-Y         YANK                                                        │
 │   ALT-Y          ROTATE KILL RING AND YANK AGAIN                             │
 │   ALT-\          SQUEEZE ADJACENT WHITESPACE                                 │
 │   CTRL-T         TRANSPOSE                                                   │
@@ -83,7 +88,6 @@
 │   ALT-U          UPPERCASE WORD                                              │
 │   ALT-L          LOWERCASE WORD                                              │
 │   ALT-C          CAPITALIZE WORD                                             │
-│   CTRL-C         INTERRUPT PROCESS                                           │
 │   CTRL-Z         SUSPEND PROCESS                                             │
 │   CTRL-\         QUIT PROCESS                                                │
 │   CTRL-S         PAUSE OUTPUT                                                │
@@ -243,7 +247,7 @@ static struct sigaction orig_cont;
 static struct sigaction orig_winch;
 static struct termios orig_termios;
 static char *history[BESTLINE_MAX_HISTORY];
-static unsigned (*xlatCallback)(unsigned);
+static bestlineXlatCallback *xlatCallback;
 static bestlineHintsCallback *hintsCallback;
 static bestlineFreeHintsCallback *freeHintsCallback;
 static bestlineCompletionCallback *completionCallback;
@@ -290,7 +294,7 @@ static int GetMonospaceCharacterWidth(unsigned c) {
  * and aren't in the number categorie (Nd, Nl, No). We also add a few
  * other things like blocks and emoji (So).
  */
-static char IsSeparator(unsigned c) {
+char bestlineIsSeparator(unsigned c) {
     int m, l, r, n;
     if (c < 0200) {
         return !(('0' <= c && c <= '9') ||
@@ -1070,8 +1074,8 @@ unsigned bestlineUppercase(unsigned c) {
     }
 }
 
-static char NotSeparator(unsigned c) {
-    return !IsSeparator(c);
+char bestlineNotSeparator(unsigned c) {
+    return !bestlineIsSeparator(c);
 }
 
 static unsigned GetMirror(const unsigned short A[][2], size_t n, unsigned c) {
@@ -1091,7 +1095,7 @@ static unsigned GetMirror(const unsigned short A[][2], size_t n, unsigned c) {
     return 0;
 }
 
-static unsigned GetMirrorLeft(unsigned c) {
+unsigned bestlineMirrorLeft(unsigned c) {
     static const unsigned short kMirrorRight[][2] = {
         {L')', L'('},   {L']', L'['},   {L'}', L'{'},   {L'⁆', L'⁅'},
         {L'⁾', L'⁽'},   {L'₎', L'₍'},   {L'⌉', L'⌈'},   {L'⌋', L'⌊'},
@@ -1110,7 +1114,7 @@ static unsigned GetMirrorLeft(unsigned c) {
                      c);
 }
 
-static unsigned GetMirrorRight(unsigned c) {
+unsigned bestlineMirrorRight(unsigned c) {
     static const unsigned short kMirrorLeft[][2] = {
         {L'(', L')'},   {L'[', L']'},   {L'{', L'}'},   {L'⁅', L'⁆'},
         {L'⁽', L'⁾'},   {L'₍', L'₎'},   {L'⌈', L'⌉'},   {L'⌊', L'⌋'},
@@ -1129,8 +1133,10 @@ static unsigned GetMirrorRight(unsigned c) {
                      c);
 }
 
-static char IsXeparator(unsigned c) {
-    return IsSeparator(c) && !GetMirrorLeft(c) && !GetMirrorRight(c);
+char bestlineIsXeparator(unsigned c) {
+    return (bestlineIsSeparator(c) &&
+            !bestlineMirrorLeft(c) &&
+            !bestlineMirrorRight(c));
 }
 
 static unsigned Capitalize(unsigned c) {
@@ -1331,7 +1337,7 @@ static char *GetLineBlock(FILE *f) {
     }
 }
 
-static ssize_t ReadCharacter(int fd, char *p, size_t n) {
+long bestlineReadCharacter(int fd, char *p, unsigned long n) {
     int e;
     size_t i;
     ssize_t rc;
@@ -1444,7 +1450,16 @@ static ssize_t ReadCharacter(int fd, char *p, size_t n) {
             break;
         case kEsc:
             if (0x20 <= c && c <= 0x2f) { /* Nf */
-                t = kNf;
+                /*
+                 * Almost no one uses ANSI Nf sequences
+                 * They overlaps with alt+graphic keystrokes
+                 * We care more about being able to type alt-/
+                 */
+                if (c == ' ' || c == '#') {
+                    t = kNf;
+                } else {
+                    t = kDone;
+                }
             } else if (0x30 <= c && c <= 0x3f) { /* Fp */
                 t = kDone;
             } else if (0x20 <= c && c <= 0x5F) { /* Fe */
@@ -1463,8 +1478,6 @@ static ssize_t ReadCharacter(int fd, char *p, size_t n) {
                 case '_': /* APC (Application Program Command) */
                     t = kStr;
                     break;
-                case '\\':
-                    goto Whoopsie;
                 default:
                     t = kDone;
                     break;
@@ -1562,7 +1575,7 @@ static char *GetLineChar(int fin, int fout) {
             rc = -1;
             break;
         }
-        if ((rc = ReadCharacter(fin, seq, sizeof(seq))) == -1) {
+        if ((rc = bestlineReadCharacter(fin, seq, sizeof(seq))) == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 if (WaitUntilReady(fin, POLLIN) > 0) {
                     continue;
@@ -1584,7 +1597,7 @@ static char *GetLineChar(int fin, int fout) {
         }
         if (seq[0] == '\r') {
             if (HasPendingInput(fin)) {
-                if ((rc = ReadCharacter(fin, seq + 1, sizeof(seq) - 1)) > 0) {
+                if ((rc = bestlineReadCharacter(fin, seq + 1, sizeof(seq) - 1)) > 0) {
                     if (seq[0] == '\n') {
                         break;
                     }
@@ -1681,12 +1694,19 @@ static int ParseUnsigned(const char *s, void *e) {
     return x;
 }
 
+/**
+ * Returns UNICODE CJK Monospace Width of string.
+ *
+ * Control codes and ANSI sequences have a width of zero. We only parse
+ * a limited subset of ANSI here since we don't store ANSI codes in the
+ * linenoiseState::buf, but we do encourage CSI color codes in prompts.
+ */
 static size_t GetMonospaceWidth(const char *p, size_t n, char *out_haswides) {
     int c, d;
     size_t i, w;
     struct rune r;
     char haswides;
-    enum { kAscii, kUtf8, kEsc, kCsi1, kCsi2, kSs, kNf, kStr, kStr2 } t;
+    enum { kAscii, kUtf8, kEsc, kCsi1, kCsi2 } t;
     for (haswides = r.c = r.n = w = i = 0, t = kAscii; i < n; ++i) {
         c = p[i] & 255;
         switch (t) {
@@ -1710,85 +1730,27 @@ static size_t GetMonospaceWidth(const char *p, size_t n, char *out_haswides) {
                 r.c <<= 6;
                 r.c |= c & 077;
                 if (!--r.n) {
-                    switch (r.c) {
-                    case 033:
-                        t = kEsc;
-                        break;
-                    case 0x9b:
-                        t = kCsi1;
-                        break;
-                    case 0x8e:
-                    case 0x8f:
-                        t = kSs;
-                        break;
-                    case 0x90:
-                    case 0x98:
-                    case 0x9d:
-                    case 0x9e:
-                    case 0x9f:
-                        t = kStr;
-                        break;
-                    default:
-                        d = GetMonospaceCharacterWidth(r.c);
-                        d = Max(0, d);
-                        w += d;
-                        haswides |= d > 1;
-                        t = kAscii;
-                        break;
-                    }
+                    d = GetMonospaceCharacterWidth(r.c);
+                    d = Max(0, d);
+                    w += d;
+                    haswides |= d > 1;
+                    t = kAscii;
+                    break;
                 }
             } else {
                 goto Whoopsie;
             }
             break;
         case kEsc:
-            if (0x20 <= c && c <= 0x2f) {
-                t = kNf;
-            } else if (0x30 <= c && c <= 0x3f) {
-                t = kAscii;
-            } else if (0x20 <= c && c <= 0x5F) {
-                switch (c) {
-                case '[':
-                    t = kCsi1;
-                    break;
-                case 'N':
-                case 'O':
-                    t = kSs;
-                    break;
-                case 'P':
-                case 'X':
-                case ']':
-                case '^':
-                case '_':
-                    t = kStr;
-                    break;
-                default:
-                    t = kAscii;
-                    break;
-                }
-            } else if (0x60 <= c && c <= 0x7e) {
-                t = kAscii;
-            } else if (c == 033) {
-                if (i == 3) t = kAscii;
+            if (c == '[') {
+                t = kCsi1;
             } else {
                 t = kAscii;
             }
             break;
-        case kSs:
-            t = kAscii;
-            break;
-         case kNf:
-             if (0x30 <= c && c <= 0x7e) {
-                 t = kAscii;
-             } else if (!(0x20 <= c && c <= 0x2f)) {
-                 goto Whoopsie;
-             }
-            break;
         case kCsi1:
             if (0x20 <= c && c <= 0x2f) {
                 t = kCsi2;
-            } else if (c == '[' && i == 3) {
-                /* linux function keys */
             } else if (0x40 <= c && c <= 0x7e) {
                 t = kAscii;
             } else if (!(0x30 <= c && c <= 0x3f)) {
@@ -1800,31 +1762,6 @@ static size_t GetMonospaceWidth(const char *p, size_t n, char *out_haswides) {
                 t = kAscii;
             } else if (!(0x20 <= c && c <= 0x2f)) {
                 goto Whoopsie;
-            }
-            break;
-        case kStr:
-            switch (c) {
-            case '\a':
-                t = kAscii;
-                break;
-            case 0033:
-            case 0302:
-                t = kStr2;
-                break;
-            default:
-                break;
-            }
-            break;
-        case kStr2:
-            switch (c) {
-            case '\a':
-            case '\\':
-            case 0234:
-                t = kAscii;
-                break;
-            default:
-                t = kStr;
-                break;
             }
             break;
         default:
@@ -1962,7 +1899,7 @@ static ssize_t bestlineRead(int fd, char *buf, size_t size,
             refreshme = 1;
         }
         if (refreshme) bestlineRefreshLine(l);
-        rc = ReadCharacter(fd, buf, size);
+        rc = bestlineReadCharacter(fd, buf, size);
     } while (rc == -1 && errno == EINTR);
     if (rc != -1) {
         got = rc;
@@ -2271,11 +2208,11 @@ static size_t Backward(struct bestlineState *l, size_t pos) {
     return pos;
 }
 
-static int bestlineMirrorLeft(struct bestlineState *l, int res[2]) {
+static int bestlineEditMirrorLeft(struct bestlineState *l, int res[2]) {
     unsigned c, pos, left, right, depth, index;
     if ((pos = Backward(l, l->pos))) {
         right = GetUtf8(l->buf + pos, l->len - pos).c;
-        if ((left = GetMirrorLeft(right))) {
+        if ((left = bestlineMirrorLeft(right))) {
             depth = 0;
             index = pos;
             do {
@@ -2298,13 +2235,13 @@ static int bestlineMirrorLeft(struct bestlineState *l, int res[2]) {
     return -1;
 }
 
-static int bestlineMirrorRight(struct bestlineState *l, int res[2]) {
+static int bestlineEditMirrorRight(struct bestlineState *l, int res[2]) {
     struct rune rune;
     unsigned pos, left, right, depth, index;
     pos = l->pos;
     rune = GetUtf8(l->buf + pos, l->len - pos);
     left = rune.c;
-    if ((right = GetMirrorRight(left))) {
+    if ((right = bestlineMirrorRight(left))) {
         depth = 0;
         index = pos;
         do {
@@ -2326,10 +2263,10 @@ static int bestlineMirrorRight(struct bestlineState *l, int res[2]) {
     return -1;
 }
 
-static int bestlineMirror(struct bestlineState *l, int res[2]) {
+static int bestlineEditMirror(struct bestlineState *l, int res[2]) {
     int rc;
-    rc = bestlineMirrorLeft(l, res);
-    if (rc == -1) rc = bestlineMirrorRight(l, res);
+    rc = bestlineEditMirrorLeft(l, res);
+    if (rc == -1) rc = bestlineEditMirrorRight(l, res);
     return rc;
 }
 
@@ -2365,7 +2302,7 @@ static void bestlineRefreshLineImpl(struct bestlineState *l, int force) {
         gotwinch = 0;
         l->ws = GetTerminalSize(l->ws, l->ifd, l->ofd);
     }
-    hasflip = !l->final && !bestlineMirror(l, flip);
+    hasflip = !l->final && !bestlineEditMirror(l, flip);
 
 StartOver:
     fd = l->ofd;
@@ -2599,14 +2536,14 @@ static size_t Forwards(struct bestlineState *l, size_t pos, char pred(unsigned))
 }
 
 static size_t ForwardWord(struct bestlineState *l, size_t pos) {
-    pos = Forwards(l, pos, IsSeparator);
-    pos = Forwards(l, pos, NotSeparator);
+    pos = Forwards(l, pos, bestlineIsSeparator);
+    pos = Forwards(l, pos, bestlineNotSeparator);
     return pos;
 }
 
 static size_t BackwardWord(struct bestlineState *l, size_t pos) {
-    pos = Backwards(l, pos, IsSeparator);
-    pos = Backwards(l, pos, NotSeparator);
+    pos = Backwards(l, pos, bestlineIsSeparator);
+    pos = Backwards(l, pos, bestlineNotSeparator);
     return pos;
 }
 
@@ -2616,13 +2553,13 @@ static size_t EscapeWord(struct bestlineState *l) {
     for (i = l->pos; i && i < l->len; i += r.n) {
         if (i < l->len) {
             r = GetUtf8(l->buf + i, l->len - i);
-            if (IsSeparator(r.c)) break;
+            if (bestlineIsSeparator(r.c)) break;
         }
         if ((j = i)) {
             do --j;
             while (j && (l->buf[j] & 0300) == 0200);
             r = GetUtf8(l->buf + j, l->len - j);
-            if (IsSeparator(r.c)) break;
+            if (bestlineIsSeparator(r.c)) break;
         }
     }
     return i;
@@ -2652,22 +2589,22 @@ static void bestlineEditRightWord(struct bestlineState *l) {
 
 static void bestlineEditLeftExpr(struct bestlineState *l) {
     int mark[2];
-    l->pos = Backwards(l, l->pos, IsXeparator);
-    if (!bestlineMirrorLeft(l, mark)) {
+    l->pos = Backwards(l, l->pos, bestlineIsXeparator);
+    if (!bestlineEditMirrorLeft(l, mark)) {
         l->pos = mark[0];
     } else {
-        l->pos = Backwards(l, l->pos, NotSeparator);
+        l->pos = Backwards(l, l->pos, bestlineNotSeparator);
     }
     bestlineRefreshLine(l);
 }
 
 static void bestlineEditRightExpr(struct bestlineState *l) {
     int mark[2];
-    l->pos = Forwards(l, l->pos, IsXeparator);
-    if (!bestlineMirrorRight(l, mark)) {
+    l->pos = Forwards(l, l->pos, bestlineIsXeparator);
+    if (!bestlineEditMirrorRight(l, mark)) {
         l->pos = Forward(l, mark[1]);
     } else {
-        l->pos = Forwards(l, l->pos, NotSeparator);
+        l->pos = Forwards(l, l->pos, bestlineNotSeparator);
     }
     bestlineRefreshLine(l);
 }
@@ -2718,10 +2655,10 @@ static void bestlineEditXlatWord(struct bestlineState *l, unsigned xlat(unsigned
     struct rune r;
     struct abuf ab;
     abInit(&ab);
-    i = Forwards(l, l->pos, IsSeparator);
+    i = Forwards(l, l->pos, bestlineIsSeparator);
     for (j = i; j < l->len; j += r.n) {
         r = GetUtf8(l->buf + j, l->len - j);
-        if (IsSeparator(r.c)) break;
+        if (bestlineIsSeparator(r.c)) break;
         if ((c = xlat(r.c)) != r.c) {
             abAppendw(&ab, EncodeUtf8(c));
         } else { /* avoid canonicalization */
@@ -2821,10 +2758,10 @@ static void bestlineEditTransposeWords(struct bestlineState *l) {
     char *q, *p;
     size_t pi, xi, xj, yi, yj;
     pi = EscapeWord(l);
-    xj = Backwards(l, pi, IsSeparator);
-    xi = Backwards(l, xj, NotSeparator);
-    yi = Forwards(l, pi, IsSeparator);
-    yj = Forwards(l, yi, NotSeparator);
+    xj = Backwards(l, pi, bestlineIsSeparator);
+    xi = Backwards(l, xj, bestlineNotSeparator);
+    yi = Forwards(l, pi, bestlineIsSeparator);
+    yj = Forwards(l, yi, bestlineNotSeparator);
     if (!(xi < xj && xj < yi && yi < yj)) return;
     p = q = (char *)malloc(yj - xi);
     p = Copy(p, l->buf + yi, yj - yi);
@@ -2839,8 +2776,8 @@ static void bestlineEditTransposeWords(struct bestlineState *l) {
 
 static void bestlineEditSqueeze(struct bestlineState *l) {
     size_t i, j;
-    i = Backwards(l, l->pos, IsSeparator);
-    j = Forwards(l, l->pos, IsSeparator);
+    i = Backwards(l, l->pos, bestlineIsSeparator);
+    j = Forwards(l, l->pos, bestlineIsSeparator);
     if (!(i < j)) return;
     memmove(l->buf + i, l->buf + j, l->len - j + 1);
     l->len -= j - i;
@@ -2864,26 +2801,26 @@ static size_t bestlineEscape(char *d, const char *s, size_t n) {
     unsigned c, w, l;
     for (p = d, l = i = 0; i < n; ++i) {
         switch ((c = s[i] & 255)) {
-            Case('\a', w = Read16le("\\a"));
-            Case('\b', w = Read16le("\\b"));
-            Case('\t', w = Read16le("\\t"));
-            Case('\n', w = Read16le("\\n"));
-            Case('\v', w = Read16le("\\v"));
-            Case('\f', w = Read16le("\\f"));
-            Case('\r', w = Read16le("\\r"));
-            Case('"',  w = Read16le("\\\""));
-            Case('\'', w = Read16le("\\\'"));
-            Case('\\', w = Read16le("\\\\"));
-            default:
-                if (c <= 0x1F || c == 0x7F ||
-                    (c == '?' && l == '?')) {
-                    w = Read16le("\\x");
-                    w |= "0123456789abcdef"[(c & 0xF0) >> 4] << 020;
-                    w |= "0123456789abcdef"[(c & 0x0F) >> 0] << 030;
-                } else {
-                    w = c;
-                }
-                break;
+        Case('\a', w = Read16le("\\a"));
+        Case('\b', w = Read16le("\\b"));
+        Case('\t', w = Read16le("\\t"));
+        Case('\n', w = Read16le("\\n"));
+        Case('\v', w = Read16le("\\v"));
+        Case('\f', w = Read16le("\\f"));
+        Case('\r', w = Read16le("\\r"));
+        Case('"',  w = Read16le("\\\""));
+        Case('\'', w = Read16le("\\\'"));
+        Case('\\', w = Read16le("\\\\"));
+        default:
+            if (c <= 0x1F || c == 0x7F ||
+                (c == '?' && l == '?')) {
+                w = Read16le("\\x");
+                w |= "0123456789abcdef"[(c & 0xF0) >> 4] << 020;
+                w |= "0123456789abcdef"[(c & 0x0F) >> 0] << 030;
+            } else {
+                w = c;
+            }
+            break;
         }
         p[0] = (w & 0x000000ff) >> 000;
         p[1] = (w & 0x0000ff00) >> 010;
@@ -2933,6 +2870,149 @@ static void bestlineEditCtrlq(struct bestlineState *l) {
 }
 
 /**
+ * Moves last item inside current s-expression to outside, e.g.
+ *
+ *     (a| b c)
+ *     (a| b) c
+ *
+ * The cursor position changes only if a paren is moved before it:
+ *
+ *     (a b    c   |)
+ *     (a b)    c   |
+ *
+ * To accommodate non-LISP languages we connect unspaced outer symbols:
+ *
+ *     f(a,| b, g())
+ *     f(a,| b), g()
+ *
+ * Our standard keybinding is ALT-SHIFT-B.
+ */
+static void bestlineEditBarf(struct bestlineState *l) {
+    struct rune r;
+    unsigned long w;
+    size_t i, j, pos, depth = 0;
+    unsigned lhs, rhs, end, *stack = 0;
+    /* go as far right within current s-expr as possible */
+    for (pos = l->pos;; pos += r.n) {
+        if (pos == l->len) goto Finish;
+        r = GetUtf8(l->buf + pos, l->len - pos);
+        if (depth) {
+            if (r.c == stack[depth - 1]) {
+                --depth;
+            }
+        } else {
+            if ((rhs = bestlineMirrorRight(r.c))) {
+                stack = realloc(stack, ++depth * sizeof(*stack));
+                stack[depth - 1] = rhs;
+            } else if (bestlineMirrorLeft(r.c)) {
+                end = pos;
+                break;
+            }
+        }
+    }
+    /* go back one item */
+    pos = Backwards(l, pos, bestlineIsXeparator);
+    for (;; pos = i) {
+        if (!pos) goto Finish;
+        i = Backward(l, pos);
+        r = GetUtf8(l->buf + i, l->len - i);
+        if (depth) {
+            if (r.c == stack[depth - 1]) {
+                --depth;
+            }
+        } else {
+            if ((lhs = bestlineMirrorLeft(r.c))) {
+                stack = realloc(stack, ++depth * sizeof(*stack));
+                stack[depth - 1] = lhs;
+            } else if (bestlineIsSeparator(r.c)) {
+                break;
+            }
+        }
+    }
+    pos = Backwards(l, pos, bestlineIsXeparator);
+    /* now move the text */
+    r = GetUtf8(l->buf + end, l->len - end);
+    memmove(l->buf + pos + r.n, l->buf + pos, end - pos);
+    w = EncodeUtf8(r.c);
+    for (i = 0; i < r.n; ++i) {
+        l->buf[pos + i] = w;
+        w >>= 8;
+    }
+    if (l->pos > pos) {
+        l->pos += r.n;
+    }
+    bestlineRefreshLine(l);
+Finish:
+    free(stack);
+}
+
+/**
+ * Moves first item outside current s-expression to inside, e.g.
+ *
+ *     (a| b) c d
+ *     (a| b c) d
+ *
+ * To accommodate non-LISP languages we connect unspaced outer symbols:
+ *
+ *     f(a,| b), g()
+ *     f(a,| b, g())
+ *
+ * Our standard keybinding is ALT-SHIFT-S.
+ */
+static void bestlineEditSlurp(struct bestlineState *l) {
+    char rp[6];
+    struct rune r;
+    unsigned long w;
+    size_t i, pos, depth = 0;
+    unsigned rhs, point = 0, start = 0, *stack = 0;
+    /* go to outside edge of current s-expr */
+    for (pos = l->pos; pos < l->len; pos += r.n) {
+        r = GetUtf8(l->buf + pos, l->len - pos);
+        if (depth) {
+            if (r.c == stack[depth - 1]) {
+                --depth;
+            }
+        } else {
+            if ((rhs = bestlineMirrorRight(r.c))) {
+                stack = realloc(stack, ++depth * sizeof(*stack));
+                stack[depth - 1] = rhs;
+            } else if (bestlineMirrorLeft(r.c)) {
+                point = pos;
+                pos += r.n;
+                start = pos;
+                break;
+            }
+        }
+    }
+    /* go forward one item */
+    pos = Forwards(l, pos, bestlineIsXeparator);
+    for (; pos < l->len ; pos += r.n) {
+        r = GetUtf8(l->buf + pos, l->len - pos);
+        if (depth) {
+            if (r.c == stack[depth - 1]) {
+                --depth;
+            }
+        } else {
+            if ((rhs = bestlineMirrorRight(r.c))) {
+                stack = realloc(stack, ++depth * sizeof(*stack));
+                stack[depth - 1] = rhs;
+            } else if (bestlineIsSeparator(r.c)) {
+                break;
+            }
+        }
+    }
+    /* now move the text */
+    memcpy(rp, l->buf + point, start - point);
+    memmove(l->buf + point, l->buf + start, pos - start);
+    memcpy(l->buf + pos - (start - point), rp, start - point);
+    bestlineRefreshLine(l);
+    free(stack);
+}
+
+static void bestlineEditRaise(struct bestlineState *l) {
+}
+
+/**
  * Runs bestline engine.
  *
  * This function is the core of the line editing capability of bestline.
@@ -2948,8 +3028,8 @@ static ssize_t bestlineEdit(int stdin_fd, int stdout_fd, const char *prompt,
                             char **obuf) {
     ssize_t rc;
     size_t nread;
-    char *p, seq[16];
     struct rune rune;
+    char *p, seq[16];
     unsigned long long w;
     struct bestlineState l;
     memset(&l,0,sizeof(l));
@@ -3002,10 +3082,20 @@ static ssize_t bestlineEdit(int stdin_fd, int stdout_fd, const char *prompt,
         Case(Ctrl('L'), bestlineEditRefresh(&l));
         Case(Ctrl('Z'), bestlineEditSuspend());
         Case(Ctrl('U'), bestlineEditKillLeft(&l));
-        Case(Ctrl('C'), bestlineEditInterrupt());
         Case(Ctrl('T'), bestlineEditTranspose(&l));
         Case(Ctrl('K'), bestlineEditKillRight(&l));
         Case(Ctrl('W'), bestlineEditRuboutWord(&l));
+        case Ctrl('C'):
+            if (bestlineRead(l.ifd,seq,sizeof(seq),&l) != 1) break;
+            switch (seq[0]) {
+            Case(Ctrl('C'), bestlineEditInterrupt());
+            Case(Ctrl('B'), bestlineEditBarf(&l));
+            Case(Ctrl('S'), bestlineEditSlurp(&l));
+            Case(Ctrl('R'), bestlineEditRaise(&l));
+            default:
+                break;
+            }
+            break;
         case Ctrl('X'):
             if (l.seq[1][0] == Ctrl('X')) {
                 bestlineEditGoto(&l);
@@ -3035,6 +3125,9 @@ static ssize_t bestlineEdit(int stdin_fd, int stdout_fd, const char *prompt,
             switch (seq[1]) {
             Case('<', bestlineEditBof(&l));
             Case('>', bestlineEditEof(&l));
+            Case('B', bestlineEditBarf(&l));
+            Case('S', bestlineEditSlurp(&l));
+            Case('R', bestlineEditRaise(&l));
             Case('y', bestlineEditRotate(&l));
             Case('\\', bestlineEditSqueeze(&l));
             Case('b', bestlineEditLeftWord(&l));
@@ -3093,19 +3186,19 @@ static ssize_t bestlineEdit(int stdin_fd, int stdout_fd, const char *prompt,
                 case '[':
                     if (nread < 4) break;
                     switch (seq[3]) {
-                        Case('C', bestlineEditRightExpr(&l)); /* \e\e[C alt-right */
-                        Case('D', bestlineEditLeftExpr(&l));  /* \e\e[D alt-left */
-                        default:
-                            break;
+                    Case('C', bestlineEditRightExpr(&l)); /* \e\e[C alt-right */
+                    Case('D', bestlineEditLeftExpr(&l));  /* \e\e[D alt-left */
+                    default:
+                        break;
                     }
                     break;
                 case 'O':
                     if (nread < 4) break;
                     switch (seq[3]) {
-                        Case('C', bestlineEditRightExpr(&l)); /* \e\eOC alt-right */
-                        Case('D', bestlineEditLeftExpr(&l));  /* \e\eOD alt-left */
-                        default:
-                            break;
+                    Case('C', bestlineEditRightExpr(&l)); /* \e\eOC alt-right */
+                    Case('D', bestlineEditLeftExpr(&l));  /* \e\eOD alt-left */
+                    default:
+                        break;
                     }
                     break;
                 default:
@@ -3420,7 +3513,7 @@ void bestlineSetFreeHintsCallback(bestlineFreeHintsCallback *fn) {
 /**
  * Sets character translation callback.
  */
-void bestlineSetXlatCallback(unsigned fn(unsigned)) {
+void bestlineSetXlatCallback(bestlineXlatCallback *fn) {
     xlatCallback = fn;
 }
 

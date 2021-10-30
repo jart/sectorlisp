@@ -9,11 +9,13 @@ typedef void(bestlineCompletionCallback)(const char *, bestlineCompletions *);
 typedef char *(bestlineHintsCallback)(const char *, const char **,
                                        const char **);
 typedef void(bestlineFreeHintsCallback)(void *);
+typedef unsigned(bestlineXlatCallback)(unsigned);
 
 void bestlineSetCompletionCallback(bestlineCompletionCallback *);
 void bestlineSetHintsCallback(bestlineHintsCallback *);
 void bestlineSetFreeHintsCallback(bestlineFreeHintsCallback *);
 void bestlineAddCompletion(bestlineCompletions *, const char *);
+void bestlineSetXlatCallback(bestlineXlatCallback *);
 
 char *bestline(const char *);
 char *bestlineRaw(const char *, int, int);
@@ -28,6 +30,10 @@ void bestlineMaskModeEnable(void);
 void bestlineMaskModeDisable(void);
 void bestlineDisableRawMode(void);
 void bestlineFree(void *);
-unsigned bestlineLowercase(unsigned);
+
+char bestlineIsSeparator(unsigned);
+char bestlineNotSeparator(unsigned);
+char bestlineIsXeparator(unsigned);
 unsigned bestlineUppercase(unsigned);
-void bestlineSetXlatCallback(unsigned(*)(unsigned));
+unsigned bestlineLowercase(unsigned);
+long bestlineReadCharacter(int, char *, unsigned long);

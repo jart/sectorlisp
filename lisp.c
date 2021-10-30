@@ -33,10 +33,10 @@
 │ The LISP Challenge § LISP Machine                                        ─╬─│┼
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
-#define ATOM 0
-#define CONS 1
+#define ATOM 1
+#define CONS 0
 
-#define ISATOM(x)   (~(x)&1)
+#define ISATOM(x)   ((x)&1)
 #define VALUE(x)    ((x)>>1)
 #define OBJECT(t,v) ((v)<<1|(t))
 
@@ -52,17 +52,7 @@
 #define ATOM_LAMBDA OBJECT(ATOM,38)
 #define UNDEFINED   OBJECT(ATOM,45)
 
-struct Lisp {
-  int mem[8192];
-  unsigned char syntax[256];
-  int look;
-  int globals;
-  int index;
-  char token[128];
-  char str[8192];
-};
-
-static const char kSymbols[] =
+const char kSymbols[] =
     "NIL\0"
     "T\0"
     "QUOTE\0"
@@ -78,53 +68,40 @@ static const char kSymbols[] =
 #endif
 ;
 
-static struct Lisp q[1];
+int g_look;
+int g_index;
+char g_token[128];
+int g_mem[8192];
+char g_str[8192];
 
-static void Print(int);
-static int GetList(void);
-static int GetObject(void);
-static void PrintObject(int);
-static int Eval(int, int);
+int GetList(void);
+int GetObject(void);
+void PrintObject(int);
+int Eval(int, int);
 
-static void SetupSyntax(void) {
-  q->syntax[' '] = ' ';
-  q->syntax['\r'] = ' ';
-  q->syntax['\n'] = ' ';
-  q->syntax['('] = '(';
-  q->syntax[')'] = ')';
-  q->syntax['.'] = '.';
-  q->syntax['\''] = '\'';
+void SetupBuiltins(void) {
+  memmove(g_str, kSymbols, sizeof(kSymbols));
 }
 
-static void SetupBuiltins(void) {
-  memmove(q->str, kSymbols, sizeof(kSymbols));
+int Car(int x) {
+  return g_mem[VALUE(x) + 0];
 }
 
-static inline int Car(int x) {
-  return q->mem[VALUE(x) + 0];
+int Cdr(int x) {
+  return g_mem[VALUE(x) + 1];
 }
 
-static inline int Cdr(int x) {
-  return q->mem[VALUE(x) + 1];
-}
-
-static int Set(int i, int k, int v) {
-  q->mem[VALUE(i) + 0] = k;
-  q->mem[VALUE(i) + 1] = v;
-  return i;
-}
-
-static int Cons(int car, int cdr) {
+int Cons(int car, int cdr) {
   int i, cell;
-  i = q->index;
-  q->mem[i + 0] = car;
-  q->mem[i + 1] = cdr;
-  q->index = i + 2;
+  i = g_index;
+  g_mem[i + 0] = car;
+  g_mem[i + 1] = cdr;
+  g_index = i + 2;
   cell = OBJECT(CONS, i);
   return cell;
 }
 
-static char *StpCpy(char *d, char *s) {
+char *StpCpy(char *d, char *s) {
   char c;
   do {
     c = *s++;
@@ -133,10 +110,10 @@ static char *StpCpy(char *d, char *s) {
   return d;
 }
 
-static int Intern(char *s) {
+int Intern(char *s) {
   int j, cx;
   char c, *z, *t;
-  z = q->str;
+  z = g_str;
   c = *z++;
   while (c) {
     for (j = 0;; ++j) {
@@ -144,7 +121,7 @@ static int Intern(char *s) {
         break;
       }
       if (!c) {
-        return OBJECT(ATOM, z - q->str - j - 1);
+        return OBJECT(ATOM, z - g_str - j - 1);
       }
       c = *z++;
     }
@@ -153,14 +130,14 @@ static int Intern(char *s) {
   }
   --z;
   StpCpy(z, s);
-  return OBJECT(ATOM, z - q->str);
+  return OBJECT(ATOM, z - g_str);
 }
 
-static void PrintChar(unsigned char b) {
+void PrintChar(unsigned char b) {
   if (write(1, &b, 1) == -1) exit(1);
 }
 
-static void PrintString(char *s) {
+void PrintString(char *s) {
   char c;
   for (;;) {
     if (!(c = s[0])) break;
@@ -169,12 +146,12 @@ static void PrintString(char *s) {
   }
 }
 
-static int GetChar(void) {
-  unsigned char b;
+int GetChar(void) {
+  int b;
   static char *l, *p;
   if (l || (l = p = bestlineWithHistory("* ", "sectorlisp"))) {
     if (*p) {
-      b = *p++;
+      b = *p++ & 255;
     } else {
       free(l);
       l = p = 0;
@@ -182,108 +159,83 @@ static int GetChar(void) {
     }
     return b;
   } else {
-    PrintChar('\n');
+    PrintString("\n");
     exit(0);
   }
 }
 
-static void GetToken(void) {
-  char *t;
-  int b, x;
-  b = q->look;
-  t = q->token;
-  for (;;) {
-    x = q->syntax[b];
-    if (x != ' ') break;
-    b = GetChar();
-  }
-  if (x) {
-    *t++ = b;
-    b = GetChar();
-  } else {
-    while (b && !x) {
-      *t++ = b;
-      b = GetChar();
-      x = q->syntax[b];
+void GetToken(void) {
+  int al;
+  char *di;
+  di = g_token;
+  do {
+    if (g_look > ' ') {
+      *di++ = g_look;
     }
-  }
-  *t++ = 0;
-  q->look = b;
+    al = g_look;
+    g_look = GetChar();
+  } while (al <= ' ' || (al > ')' && g_look > ')'));
+  *di++ = 0;
 }
 
-static int ConsumeObject(void) {
+int ConsumeObject(void) {
   GetToken();
   return GetObject();
 }
 
-static int Cadr(int x) {
-  return Car(Cdr(x));  /* ((A B C D) (E F G) H I) → (E F G) */
-}
-
-static int List(int x, int y) {
+int List(int x, int y) {
   return Cons(x, Cons(y, NIL));
 }
 
-static int Quote(int x) {
+int Quote(int x) {
   return List(ATOM_QUOTE, x);
 }
 
-static int GetQuote(void) {
+int GetQuote(void) {
   return Quote(ConsumeObject());
 }
 
-static int AddList(int x) {
+int AddList(int x) {
   return Cons(x, GetList());
 }
 
-static int GetList(void) {
+int GetList(void) {
   GetToken();
-  switch (*q->token & 0xFF) {
-    default:
-      return AddList(GetObject());
-    case ')':
-      return NIL;
-    case '.':
-      return ConsumeObject();
 #if QUOTES
-    case '\'':
-      return AddList(GetQuote());
+  if (*g_token == '.') return ConsumeObject();
+  if (*g_token == '\'') return AddList(GetQuote());
 #endif
-  }
+  if (*g_token == ')') return NIL;
+  return AddList(GetObject());
 }
 
-static int GetObject(void) {
-  switch (*q->token & 0xFF) {
-    default:
-      return Intern(q->token);
-    case '(':
-      return GetList();
+int GetObject(void) {
 #if QUOTES
-    case '\'':
-      return GetQuote();
+  if (*g_token == '\'') return GetQuote();
 #endif
-  }
+  if (*g_token == '(') return GetList();
+  return Intern(g_token);
 }
 
-static int ReadObject(void) {
-  q->look = GetChar();
+int ReadObject(void) {
+  g_look = GetChar();
   GetToken();
   return GetObject();
 }
 
-static int Read(void) {
+int Read(void) {
   return ReadObject();
 }
 
-static void PrintAtom(int x) {
-  PrintString(q->str + VALUE(x));
+void PrintAtom(int x) {
+  PrintString(g_str + VALUE(x));
 }
 
-static void PrintList(int x) {
+void PrintList(int x) {
 #if QUOTES
   if (Car(x) == ATOM_QUOTE) {
     PrintChar('\'');
-    PrintObject(Cadr(x));
+    PrintObject(Car(Cdr(x)));
     return;
   }
 #endif
@@ -294,7 +246,7 @@ static void PrintList(int x) {
       PrintChar(' ');
       PrintObject(Car(x));
     } else {
-      PrintString(" . ");
+      PrintString("∙");
       PrintObject(x);
       break;
     }
@@ -302,7 +254,7 @@ static void PrintList(int x) {
   PrintChar(')');
 }
 
-static void PrintObject(int x) {
+void PrintObject(int x) {
   if (ISATOM(x)) {
     PrintAtom(x);
   } else {
@@ -310,60 +262,46 @@ static void PrintObject(int x) {
   }
 }
 
-static void Print(int i) {
+void Print(int i) {
   PrintObject(i);
-  PrintString("\r\n");
+  PrintString("\n");
 }
 
 /*───────────────────────────────────────────────────────────────────────────│─╗
 │ The LISP Challenge § Bootstrap John McCarthy's Metacircular Evaluator    ─╬─│┼
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
-static int Caar(int x) {
-  return Car(Car(x));  /* ((A B C D) (E F G) H I) → A */
+int Assoc(int x, int y) {
+  if (y == NIL) return NIL;
+  if (x == Car(Car(y))) return Cdr(Car(y));
+  return Assoc(x, Cdr(y));
 }
 
-static int Cdar(int x) {
-  return Cdr(Car(x));  /* ((A B C D) (E F G) H I) → (B C D) */
+int Evcon(int c, int a) {
+  if (Eval(Car(Car(c)), a) != NIL) {
+    return Eval(Car(Cdr(Car(c))), a);
+  } else {
+    return Evcon(Cdr(c), a);
+  }
 }
 
-static int Cadar(int x) {
-  return Cadr(Car(x));  /* ((A B C D) (E F G) H I) → B */
-}
-
-static int Caddr(int x) {
-  return Cadr(Cdr(x));  /* ((A B C D) (E F G) H I) → H */
-}
-
-static int Caddar(int x) {
-  return Caddr(Car(x));  /* ((A B C D) (E F G) H I) → C */
-}
-
-static int Evcon(int c, int a) {
-  return Eval(Caar(c), a) != NIL ? Eval(Cadar(c), a) : Evcon(Cdr(c), a);
-}
-
-static int Assoc(int x, int a) {
-  return a ? Caar(a) == x ? Cdar(a) : Assoc(x, Cdr(a)) : NIL;
-}
-
-static int Pairlis(int x, int y, int a) {  /* it's zip() basically */
-  int di, si;
-  if (!x) return a;
+int Pairlis(int x, int y, int a) {
+  int di, si; /* it's zip() basically */
+  if (x == NIL) return a;
   di = Cons(Car(x), Car(y));
   si = Pairlis(Cdr(x), Cdr(y), a);
   return Cons(di, si); /* Tail-Modulo-Cons */
 }
 
-static int Evlis(int m, int a) {
+int Evlis(int m, int a) {
   int di, si;
-  if (!m) return NIL;
+  if (m == NIL) return NIL;
   di = Eval(Car(m), a);
   si = Evlis(Cdr(m), a);
   return Cons(di, si);
 }
 
-static int Apply(int fn, int x, int a) {
+int Apply(int fn, int x, int a) {
   int t1, si, ax;
   if (ISATOM(fn)) {
     switch (fn) {
@@ -372,15 +310,15 @@ static int Apply(int fn, int x, int a) {
       return UNDEFINED;
 #endif
     case ATOM_CAR:
-      return Caar(x);
+      return Car(Car(x));
     case ATOM_CDR:
-      return Cdar(x);
+      return Cdr(Car(x));
     case ATOM_ATOM:
       return ISATOM(Car(x)) ? ATOM_T : NIL;
     case ATOM_CONS:
-      return Cons(Car(x), Cadr(x));
+      return Cons(Car(x), Car(Cdr(x)));
     case ATOM_EQ:
-      return Car(x) == Cadr(x) ? ATOM_T : NIL;
+      return Car(x) == Car(Cdr(x)) ? ATOM_T : NIL;
     default:
       return Apply(Eval(fn, a), x, a);
     }
@@ -388,27 +326,27 @@ static int Apply(int fn, int x, int a) {
   if (Car(fn) == ATOM_LAMBDA) {
     t1 = Cdr(fn);
     si = Pairlis(Car(t1), x, a);
-    ax = Cadr(t1);
+    ax = Car(Cdr(t1));
     return Eval(ax, si);
   }
   return UNDEFINED;
 }
 
-static int Evaluate(int e, int a) {
+int Evaluate(int e, int a) {
   int ax;
   if (ISATOM(e))
     return Assoc(e, a);
   ax = Car(e);
   if (ISATOM(ax)) {
     if (ax == ATOM_QUOTE)
-      return Cadr(e);
+      return Car(Cdr(e));
     if (ax == ATOM_COND)
       return Evcon(Cdr(e), a);
   }
   return Apply(ax, Evlis(Cdr(e), a), a);
 }
 
-static int Eval(int e, int a) {
+int Eval(int e, int a) {
   int ax;
 #if TRACE
   PrintString("> ");
@@ -432,12 +370,11 @@ static int Eval(int e, int a) {
 
 void Repl(void) {
   for (;;) {
-    Print(Eval(Read(), q->globals));
+    Print(Eval(Read(), NIL));
   }
 }
 
 int main(int argc, char *argv[]) {
-  SetupSyntax();
   SetupBuiltins();
   bestlineSetXlatCallback(bestlineUppercase);
   PrintString("THE LISP CHALLENGE V1\r\n"
