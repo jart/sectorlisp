@@ -52,7 +52,8 @@ _begin:	push	%cs				# memory model cs=ds=es = 0x600
 	pop	%ds
 	pop	%es
 	pop	%ss
-	mov	$0x7c00-0x600,%cx
+	mov	$kSymbols,%si
+	mov	%si,%cx
 	mov	%cx,%sp
 	cld
 	xor	%ax,%ax
@@ -60,8 +61,7 @@ _begin:	push	%cs				# memory model cs=ds=es = 0x600
 	xor	%di,%di
 	rep stosb				# clears our bss memory
 main:	mov	$g_str,%di
-	mov	$kSymbols,%si
-	mov	$37,%cx
+	mov	$37,%cl
 	rep movsb
 0:	mov	$'\n',%dl
 	call	GetToken
@@ -75,6 +75,7 @@ main:	mov	$g_str,%di
 
 GetToken:					# GetToken():al, dl is g_look
 	mov	$g_token,%di
+	mov	%di,%si
 1:	mov	%dl,%al
 	cmp	$' ',%al
 	jbe	2f
@@ -95,7 +96,6 @@ GetToken:					# GetToken():al, dl is g_look
 GetObject:					# called just after GetToken
 	cmpb	$'(',%al
 	je	GetList
-	mov	$g_token,%si
 .Intern:
 	mov	$g_str,%di
 	xor	%al,%al
@@ -200,14 +200,13 @@ xCons:	xchg	%ax,%si
 #	jmp	Cons
 Cons:	xchg	%di,%ax
 	mov	%fs,%di
-	push	%di
 	stosw
 	xchg	%si,%ax
 	stosw
-	mov	%di,%fs
-	pop	%ax
-	ret
-1:	xchg	%di,%ax
+	xchg	%di,%ax
+	mov	%fs,%di
+	mov	%ax,%fs
+	xchg	%di,%ax
 	ret
 
 Pairlis:cmp	$NIL,%di			# Pairlis(x:di,y:si,a:dx):ax
@@ -235,10 +234,9 @@ Evcon:	push	%di				# save c
 	pop	%dx				# restore a
 	pop	%di				# restore c
 	cmp	$NIL,%ax
-	jne	2f
-	mov	2(%di),%di			# di = Cdr(c)
-	jmp	Evcon
-2:	mov	(%di),%di			# di = Car(c)
+	cmove	2(%di),%di			# di = Cdr(c)
+	jz	Evcon
+	mov	(%di),%di			# di = Car(c)
 .EvCadr:call	Cadr				# ax = Cadar(c)
 #	jmp	Eval
 
@@ -247,8 +245,8 @@ Eval:	test	$1,%al				# Eval(e:ax,a:dx):ax
 	xchg	%ax,%di				# di = e
 	mov	(%di),%ax			# ax = Car(e)
 	cmp	$ATOM_QUOTE,%ax			# maybe CONS
-	je	Cadr
 	mov	2(%di),%di			# di = Cdr(e)
+	je	.retA
 	cmp	$ATOM_COND,%ax
 	je	Evcon
 .Ldflt2:push	%ax				# save 2
@@ -267,23 +265,6 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 	xchg	%ax,%dx
 	pop	%di				# restore 1
 	jmp	.EvCadr
-.switch:cmp	$ATOM_EQ,%ax
-	ja	.dflt1
-	mov	(%si),%di			# di = Car(x)
-.ifCar:	cmp	$ATOM_CAR,%al
-	jne	.ifCdr
-	mov	(%di),%ax
-	ret
-.ifCdr:	cmp	$ATOM_CDR,%al
-	jne	.ifAtom
-	mov	2(%di),%ax
-	ret
-.ifAtom:cmp	$ATOM_ATOM,%al
-	jne	.ifCons
-	test	$1,%di
-	jnz	.retT
-.retF:	mov	$NIL,%ax			# ax = NIL
-	ret
 .ifCons:mov	2(%si),%si			# si = Cdr(x)
 	mov	(%si),%si			# si = Cadr(x)
 	cmp	$ATOM_CONS,%al
@@ -292,6 +273,20 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 	jne	.retF
 .retT:	mov	$ATOM_T,%al			# ax = ATOM_T
 	ret
+.switch:cmp	$ATOM_EQ,%ax
+	ja	.dflt1
+	mov	(%si),%di			# di = Car(x)
+.ifCar:	cmp	$ATOM_CAR,%al
+	je	.retA
+.ifCdr:	cmp	$ATOM_CDR,%al
+	cmove	2(%di),%ax
+	je	.retD
+.ifAtom:cmp	$ATOM_ATOM,%al
+	jne	.ifCons
+	test	$1,%di
+	jnz	.retT
+.retF:	mov	$NIL,%ax			# ax = NIL
+.retD:	ret
 .dflt1:	push	%si				# save x
 	push	%dx				# save a
 	call	Eval
@@ -300,19 +295,16 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 	jmp	Apply
 
 Cadr:	mov	2(%di),%di			# contents of decrement register
-	mov	(%di),%ax			# contents of address register
+.retA:	mov	(%di),%ax			# contents of address register
 	ret
-
-assoc1:	mov	2(%si),%dx			# dx = Cdr(y)
-#	jmp	Assoc
 
 Assoc:	cmp	$NIL,%dx			# Assoc(x:ax,y:dx):ax
 	mov	%dx,%si
 	je	.retF
 	mov	(%si),%bx			# bx = Car(y)
-	mov	(%bx),%cx			# cx = Caar(y)
-	cmp	%cx,%ax
-	jne	assoc1
+	cmp	%ax,(%bx)			# (%bx) = Caar(y)
+	cmovne	2(%si),%dx			# dx = Cdr(y)
+	jne	Assoc
 	mov	2(%bx),%ax			# ax = Cdar(y)
 	ret
 
