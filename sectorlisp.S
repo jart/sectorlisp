@@ -51,9 +51,9 @@ _begin:	push	%cs				# memory model cs=ds=es = 0x600
 	push	%cs
 	pop	%ds
 	pop	%es
-	pop	%ss
 	mov	$kSymbols,%si
 	mov	%si,%cx
+	pop	%ss
 	mov	%cx,%sp
 	cld
 	xor	%ax,%ax
@@ -206,7 +206,7 @@ Cons:	xchg	%di,%ax
 	xchg	%di,%ax
 	mov	%fs,%di
 	mov	%ax,%fs
-	xchg	%di,%ax
+1:	xchg	%di,%ax
 	ret
 
 Pairlis:cmp	$NIL,%di			# Pairlis(x:di,y:si,a:dx):ax
