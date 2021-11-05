@@ -103,7 +103,8 @@ GetObject:					# called just after GetToken
 	push	%di				# save 1
 1:	cmpsb
 	jne	2f
-	cmp	-1(%di),%al
+	dec	%di
+	scasb
 	jne	1b
 	jmp	4f
 2:	pop	%si				# drop 1
@@ -112,9 +113,9 @@ GetObject:					# called just after GetToken
 	cmp	(%di),%al
 	jne	0b
 	push	%di				# StpCpy
-3:	lodsb
-	stosb
-	test	%al,%al
+3:	movsb
+	dec	%di
+	scasb
 	jnz	3b
 4:	pop	%ax				# restore 1
 	add	$-g_str,%ax			# stc
