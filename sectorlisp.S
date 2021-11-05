@@ -228,6 +228,7 @@ Pairlis:cmp	$NIL,%di			# Pairlis(x:di,y:si,a:dx):ax
 1:	xchg	%dx,%ax
 	ret
 
+1:	mov	2(%di),%di			# di = Cdr(c)
 Evcon:	push	%di				# save c
 	mov	(%di),%di			# di = Car(c)
 	mov	(%di),%ax			# ax = Caar(c)
@@ -236,8 +237,7 @@ Evcon:	push	%di				# save c
 	pop	%dx				# restore a
 	pop	%di				# restore c
 	cmp	$NIL,%ax
-	cmove	2(%di),%di			# di = Cdr(c)
-	jz	Evcon
+	jz	1b
 	mov	(%di),%di			# di = Car(c)
 .EvCadr:call	Cadr				# ax = Cadar(c)
 #	jmp	Eval
@@ -300,13 +300,13 @@ Cadr:	mov	2(%di),%di			# contents of decrement register
 .retA:	mov	(%di),%ax			# contents of address register
 	ret
 
+1:	mov	2(%si),%dx			# dx = Cdr(y)
 Assoc:	cmp	$NIL,%dx			# Assoc(x:ax,y:dx):ax
 	mov	%dx,%si
 	je	.retF
 	mov	(%si),%bx			# bx = Car(y)
 	cmp	%ax,(%bx)			# (%bx) = Caar(y)
-	cmovne	2(%si),%dx			# dx = Cdr(y)
-	jne	Assoc
+	jne	1b
 	mov	2(%bx),%ax			# ax = Cdar(y)
 	ret
 
