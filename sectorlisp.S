@@ -53,18 +53,18 @@ _begin:	push	%cs				# memory model cs=ds=es = 0x800
 	pop	%ds
 	pop	%es
 	mov	$kSymbols,%si
-	mov	%si,%cx
+	push	%si
+	xor	%di,%di				# mov g_str, %di
+	mov	$37,%cx
+	cld
+	rep movsb
+	pop	%cx
 	pop	%ss
 	mov	%cx,%sp
-	cld
 	mov	$g_mem,%ax
 	mov	%ax,%fs				# fs = &g_mem
-	xor	%di,%di
 	rep stosb				# clears our bss memory
-main:	xor	%di,%di				# mov g_str, %di
-	mov	$37,%cl
-	rep movsb
-0:	mov	$'\n',%dl
+main:	mov	$'\n',%dl
 	call	GetToken
 	call	GetObject
 	mov	$NIL,%dx
@@ -72,7 +72,7 @@ main:	xor	%di,%di				# mov g_str, %di
 	call	PrintObject
 	mov	$'\r',%al
 	call	PutChar
-	jmp	0b
+	jmp	main
 
 GetToken:					# GetToken():al, dl is g_look
 	mov	$g_token,%di
