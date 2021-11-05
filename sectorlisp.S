@@ -164,7 +164,7 @@ GetChar:
 PutChar:
 #	push	%bx				# don't clobber di,si,cx,dx
 #	push	%bp				# original ibm pc scroll up bug
-	mov	$7,%bx				# normal mda/cga style page zero
+	xor	%bx,%bx				# normal mda/cga style page zero
 	mov	$0x0e,%ah			# teletype output al cp437
 	int	$0x10				# vidya service
 #	pop	%bp				# preserves al
