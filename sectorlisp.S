@@ -30,7 +30,7 @@
 .set ATOM_CONS,		61
 .set ATOM_EQ,		71
 
-.set g_token,	0x7600
+.set g_token,	0x7800
 .set g_str,	0x0
 .set g_mem,	0x3600
 .set boot,	0x7c00
@@ -46,8 +46,8 @@ kSymbols:
 	.ascii "NIL\0T\0QUOTE\0COND\0ATOM\0CAR\0CDR\0CONS\0EQ"
 
 .type .init,@function
-.init:	ljmp	$0x800>>4,$_begin		# end of bios data roundup page
-_begin:	push	%cs				# memory model cs=ds=es = 0x800
+.init:	ljmp	$0x600>>4,$_begin		# end of bios data roundup page
+_begin:	push	%cs				# memory model cs=ds=es = 0x600
 	push	%cs
 	push	%cs
 	pop	%ds
