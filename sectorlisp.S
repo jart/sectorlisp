@@ -99,25 +99,25 @@ GetObject:					# called just after GetToken
 .Intern:
 	mov	$g_str,%di
 	xor	%al,%al
-0:	mov	$-1,%cl
-	push	%di				# save 1
+0:	push	%di				# save 1
 1:	cmpsb
 	jne	2f
 	dec	%di
 	scasb
 	jne	1b
-	jmp	4f
+	jmp	5f
 2:	pop	%si				# drop 1
 	mov	$g_token,%si
-	repne scasb
+3:	scasb
+	jne	3b
 	cmp	(%di),%al
 	jne	0b
 	push	%di				# StpCpy
-3:	movsb
+4:	movsb
 	dec	%di
 	scasb
-	jnz	3b
-4:	pop	%ax				# restore 1
+	jnz	4b
+5:	pop	%ax				# restore 1
 	add	$-g_str,%ax			# stc
 	adc	%ax,%ax				# ax = 2 * ax + carry
 .ret:	ret
