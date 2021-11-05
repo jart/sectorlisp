@@ -213,9 +213,10 @@ Cons:	xchg	%di,%ax
 Pairlis:cmp	$NIL,%di			# Pairlis(x:di,y:si,a:dx):ax
 	je	1f
 	push	2(%di)				# save 1 Cdr(x)
-	push	2(%si)				# save 2 Cdr(y)
+	lodsw
+	push	(%si)				# save 2 Cdr(y)
 	mov	(%di),%di
-	mov	(%si),%si
+	xchg	%ax,%si
 	call	Cons				# preserves dx
 	pop	%si				# restore 2
 	pop	%di				# restore 1
