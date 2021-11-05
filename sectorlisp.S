@@ -93,35 +93,6 @@ GetToken:					# GetToken():al, dl is g_look
 	xchg	%cx,%ax
 	ret
 
-GetObject:					# called just after GetToken
-	cmpb	$'(',%al
-	je	GetList
-.Intern:
-	mov	$g_str,%di
-	xor	%al,%al
-0:	push	%di				# save 1
-1:	cmpsb
-	jne	2f
-	dec	%di
-	scasb
-	jne	1b
-	jmp	5f
-2:	pop	%si				# drop 1
-	mov	$g_token,%si
-3:	scasb
-	jne	3b
-	cmp	(%di),%al
-	jne	0b
-	push	%di				# StpCpy
-4:	movsb
-	dec	%di
-	scasb
-	jnz	4b
-5:	pop	%ax				# restore 1
-	add	$-g_str,%ax			# stc
-	adc	%ax,%ax				# ax = 2 * ax + carry
-.ret:	ret
-
 .PutObject:					# .PutObject(c:al,x:di)
 	call	PutChar				# preserves di
 	xchg	%di,%ax
@@ -157,6 +128,35 @@ PrintObject:					# PrintObject(x:ax)
 4:	mov	$')',%al
 	jmp	PutChar
 
+GetObject:					# called just after GetToken
+	cmpb	$'(',%al
+	je	GetList
+.Intern:
+	mov	$g_str,%di
+	xor	%al,%al
+0:	push	%di				# save 1
+1:	cmpsb
+	jne	2f
+	dec	%di
+	scasb
+	jne	1b
+	jmp	5f
+2:	pop	%si				# drop 1
+	mov	$g_token,%si
+3:	scasb
+	jne	3b
+	cmp	(%di),%al
+	jne	0b
+	push	%di				# StpCpy
+4:	movsb
+	dec	%di
+	scasb
+	jnz	4b
+5:	pop	%ax				# restore 1
+	add	$-g_str,%ax			# stc
+	adc	%ax,%ax				# ax = 2 * ax + carry
+.ret:	ret
+
 GetChar:
 	xor	%ax,%ax				# get keystroke
 	int	$0x16				# keyboard service
@@ -175,15 +175,25 @@ PutChar:
 	mov	$'\n',%al
 	jmp	PutChar				# bx volatile, bp never used
 
-GetList:call	GetToken
-	cmpb	$')',%al
-	je	.retF
-	call	GetObject
-	push	%ax				# save 1
-	call	GetList
-	jmp	xCons
-
 ////////////////////////////////////////////////////////////////////////////////
+
+Pairlis:cmp	$NIL,%di			# Pairlis(x:di,y:si,a:dx):ax
+	je	1f
+	push	2(%di)				# save 1 Cdr(x)
+	lodsw
+	push	(%si)				# save 2 Cdr(y)
+	mov	(%di),%di
+	xchg	%ax,%si
+	call	Cons				# preserves dx
+	pop	%si				# restore 2
+	pop	%di				# restore 1
+	push	%ax				# save 3
+	call	Pairlis
+	xchg	%ax,%si
+	pop	%di				# restore 3
+	jmp	Cons				# can be inlined here
+1:	xchg	%dx,%ax
+	ret
 
 Evlis:	cmp	$NIL,%di			# Evlis(m:di,a:dx):ax
 	je	1f
@@ -210,23 +220,13 @@ Cons:	xchg	%di,%ax
 1:	xchg	%di,%ax
 	ret
 
-Pairlis:cmp	$NIL,%di			# Pairlis(x:di,y:si,a:dx):ax
-	je	1f
-	push	2(%di)				# save 1 Cdr(x)
-	lodsw
-	push	(%si)				# save 2 Cdr(y)
-	mov	(%di),%di
-	xchg	%ax,%si
-	call	Cons				# preserves dx
-	pop	%si				# restore 2
-	pop	%di				# restore 1
-	push	%ax				# save 3
-	call	Pairlis
-	xchg	%ax,%si
-	pop	%di				# restore 3
-	jmp	Cons				# can be inlined here
-1:	xchg	%dx,%ax
-	ret
+GetList:call	GetToken
+	cmpb	$')',%al
+	je	.retF
+	call	GetObject
+	push	%ax				# save 1
+	call	GetList
+	jmp	xCons
 
 1:	mov	2(%di),%di			# di = Cdr(c)
 Evcon:	push	%di				# save c
