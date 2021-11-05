@@ -30,8 +30,9 @@
 .set ATOM_CONS,		61
 .set ATOM_EQ,		71
 
-.set g_token,	0x4000
-.set g_str,	0x4080
+.set g_token,	0x7600
+.set g_str,	0x0
+.set g_mem,	0x3600
 .set boot,	0x7c00
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -45,8 +46,8 @@ kSymbols:
 	.ascii "NIL\0T\0QUOTE\0COND\0ATOM\0CAR\0CDR\0CONS\0EQ"
 
 .type .init,@function
-.init:	ljmp	$0x600>>4,$_begin		# end of bios data roundup page
-_begin:	push	%cs				# memory model cs=ds=es = 0x600
+.init:	ljmp	$0x800>>4,$_begin		# end of bios data roundup page
+_begin:	push	%cs				# memory model cs=ds=es = 0x800
 	push	%cs
 	push	%cs
 	pop	%ds
@@ -56,11 +57,11 @@ _begin:	push	%cs				# memory model cs=ds=es = 0x600
 	pop	%ss
 	mov	%cx,%sp
 	cld
-	xor	%ax,%ax
+	mov	$g_mem,%ax
 	mov	%ax,%fs				# fs = &g_mem
 	xor	%di,%di
 	rep stosb				# clears our bss memory
-main:	mov	$g_str,%di
+main:	xor	%di,%di				# mov g_str, %di
 	mov	$37,%cl
 	rep movsb
 0:	mov	$'\n',%dl
@@ -104,7 +105,7 @@ PrintObject:					# PrintObject(x:ax)
 	jz	.PrintList
 .PrintAtom:
 	shr	%di
-	lea	g_str(%di),%si
+	mov	%di,%si				# lea g_str(%di),%si
 .PrintString:					# nul-terminated in si
 	lodsb
 	test	%al,%al
@@ -132,7 +133,7 @@ GetObject:					# called just after GetToken
 	cmpb	$'(',%al
 	je	GetList
 .Intern:
-	mov	$g_str,%di
+	xor	%di,%di				# mov $g_str,%di
 	xor	%al,%al
 0:	push	%di				# save 1
 1:	cmpsb
@@ -153,8 +154,9 @@ GetObject:					# called just after GetToken
 	scasb
 	jnz	4b
 5:	pop	%ax				# restore 1
-	add	$-g_str,%ax			# stc
-	adc	%ax,%ax				# ax = 2 * ax + carry
+#	add	$-g_str,%ax
+	add	%ax,%ax				# ax = 2 * ax
+	inc	%ax				# + 1
 .ret:	ret
 
 GetChar:
