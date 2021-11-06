@@ -30,8 +30,9 @@
 .set ATOM_CONS,		61
 .set ATOM_EQ,		71
 
-.set g_token,	0x4000
-.set g_str,	0x4080
+.set g_token,	0x7800
+.set g_str,	0x0
+.set g_mem,	0x3600
 .set boot,	0x7c00
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -51,19 +52,19 @@ _begin:	push	%cs				# memory model cs=ds=es = 0x600
 	push	%cs
 	pop	%ds
 	pop	%es
-	pop	%ss
-	mov	$0x7c00-0x600,%cx
-	mov	%cx,%sp
-	cld
-	xor	%ax,%ax
-	mov	%ax,%fs				# fs = &g_mem
-	xor	%di,%di
-	rep stosb				# clears our bss memory
-main:	mov	$g_str,%di
 	mov	$kSymbols,%si
+	push	%si
+	xor	%di,%di				# mov g_str, %di
 	mov	$37,%cx
+	cld
 	rep movsb
-0:	mov	$'\n',%dl
+	pop	%cx
+	pop	%ss
+	mov	%cx,%sp
+	mov	$g_mem,%ax
+	mov	%ax,%fs				# fs = &g_mem
+	rep stosb				# clears our bss memory
+main:	mov	$'\n',%dl
 	call	GetToken
 	call	GetObject
 	mov	$NIL,%dx
@@ -71,10 +72,11 @@ main:	mov	$g_str,%di
 	call	PrintObject
 	mov	$'\r',%al
 	call	PutChar
-	jmp	0b
+	jmp	main
 
 GetToken:					# GetToken():al, dl is g_look
 	mov	$g_token,%di
+	mov	%di,%si
 1:	mov	%dl,%al
 	cmp	$' ',%al
 	jbe	2f
@@ -92,35 +94,6 @@ GetToken:					# GetToken():al, dl is g_look
 	xchg	%cx,%ax
 	ret
 
-GetObject:					# called just after GetToken
-	cmpb	$'(',%al
-	je	GetList
-	mov	$g_token,%si
-.Intern:
-	mov	$g_str,%di
-	xor	%al,%al
-0:	mov	$-1,%cl
-	push	%di				# save 1
-1:	cmpsb
-	jne	2f
-	cmp	-1(%di),%al
-	jne	1b
-	jmp	4f
-2:	pop	%si				# drop 1
-	mov	$g_token,%si
-	repne scasb
-	cmp	(%di),%al
-	jne	0b
-	push	%di				# StpCpy
-3:	lodsb
-	stosb
-	test	%al,%al
-	jnz	3b
-4:	pop	%ax				# restore 1
-	add	$-g_str,%ax			# stc
-	adc	%ax,%ax				# ax = 2 * ax + carry
-.ret:	ret
-
 .PutObject:					# .PutObject(c:al,x:di)
 	call	PutChar				# preserves di
 	xchg	%di,%ax
@@ -132,7 +105,7 @@ PrintObject:					# PrintObject(x:ax)
 	jz	.PrintList
 .PrintAtom:
 	shr	%di
-	lea	g_str(%di),%si
+	mov	%di,%si				# lea g_str(%di),%si
 .PrintString:					# nul-terminated in si
 	lodsb
 	test	%al,%al
@@ -156,6 +129,36 @@ PrintObject:					# PrintObject(x:ax)
 4:	mov	$')',%al
 	jmp	PutChar
 
+GetObject:					# called just after GetToken
+	cmpb	$'(',%al
+	je	GetList
+.Intern:
+	xor	%di,%di				# mov $g_str,%di
+	xor	%al,%al
+0:	push	%di				# save 1
+1:	cmpsb
+	jne	2f
+	dec	%di
+	scasb
+	jne	1b
+	jmp	5f
+2:	pop	%si				# drop 1
+	mov	$g_token,%si
+3:	scasb
+	jne	3b
+	cmp	(%di),%al
+	jne	0b
+	push	%di				# StpCpy
+4:	movsb
+	dec	%di
+	scasb
+	jnz	4b
+5:	pop	%ax				# restore 1
+#	add	$-g_str,%ax
+	add	%ax,%ax				# ax = 2 * ax
+	inc	%ax				# + 1
+.ret:	ret
+
 GetChar:
 	xor	%ax,%ax				# get keystroke
 	int	$0x16				# keyboard service
@@ -164,7 +167,7 @@ GetChar:
 PutChar:
 #	push	%bx				# don't clobber di,si,cx,dx
 #	push	%bp				# original ibm pc scroll up bug
-	mov	$7,%bx				# normal mda/cga style page zero
+	xor	%bx,%bx				# normal mda/cga style page zero
 	mov	$0x0e,%ah			# teletype output al cp437
 	int	$0x10				# vidya service
 #	pop	%bp				# preserves al
@@ -174,15 +177,25 @@ PutChar:
 	mov	$'\n',%al
 	jmp	PutChar				# bx volatile, bp never used
 
-GetList:call	GetToken
-	cmpb	$')',%al
-	je	.retF
-	call	GetObject
-	push	%ax				# save 1
-	call	GetList
-	jmp	xCons
-
 ////////////////////////////////////////////////////////////////////////////////
+
+Pairlis:cmp	$NIL,%di			# Pairlis(x:di,y:si,a:dx):ax
+	je	1f
+	push	2(%di)				# save 1 Cdr(x)
+	lodsw
+	push	(%si)				# save 2 Cdr(y)
+	mov	(%di),%di
+	xchg	%ax,%si
+	call	Cons				# preserves dx
+	pop	%si				# restore 2
+	pop	%di				# restore 1
+	push	%ax				# save 3
+	call	Pairlis
+	xchg	%ax,%si
+	pop	%di				# restore 3
+	jmp	Cons				# can be inlined here
+1:	xchg	%dx,%ax
+	ret
 
 Evlis:	cmp	$NIL,%di			# Evlis(m:di,a:dx):ax
 	je	1f
@@ -200,33 +213,24 @@ xCons:	xchg	%ax,%si
 #	jmp	Cons
 Cons:	xchg	%di,%ax
 	mov	%fs,%di
-	push	%di
 	stosw
 	xchg	%si,%ax
 	stosw
-	mov	%di,%fs
-	pop	%ax
-	ret
+	xchg	%di,%ax
+	mov	%fs,%di
+	mov	%ax,%fs
 1:	xchg	%di,%ax
 	ret
 
-Pairlis:cmp	$NIL,%di			# Pairlis(x:di,y:si,a:dx):ax
-	je	1f
-	push	2(%di)				# save 1 Cdr(x)
-	push	2(%si)				# save 2 Cdr(y)
-	mov	(%di),%di
-	mov	(%si),%si
-	call	Cons				# preserves dx
-	pop	%si				# restore 2
-	pop	%di				# restore 1
-	push	%ax				# save 3
-	call	Pairlis
-	xchg	%ax,%si
-	pop	%di				# restore 3
-	jmp	Cons				# can be inlined here
-1:	xchg	%dx,%ax
-	ret
+GetList:call	GetToken
+	cmpb	$')',%al
+	je	.retF
+	call	GetObject
+	push	%ax				# save 1
+	call	GetList
+	jmp	xCons
 
+1:	mov	2(%di),%di			# di = Cdr(c)
 Evcon:	push	%di				# save c
 	mov	(%di),%di			# di = Car(c)
 	mov	(%di),%ax			# ax = Caar(c)
@@ -235,10 +239,8 @@ Evcon:	push	%di				# save c
 	pop	%dx				# restore a
 	pop	%di				# restore c
 	cmp	$NIL,%ax
-	jne	2f
-	mov	2(%di),%di			# di = Cdr(c)
-	jmp	Evcon
-2:	mov	(%di),%di			# di = Car(c)
+	jz	1b
+	mov	(%di),%di			# di = Car(c)
 .EvCadr:call	Cadr				# ax = Cadar(c)
 #	jmp	Eval
 
@@ -247,8 +249,8 @@ Eval:	test	$1,%al				# Eval(e:ax,a:dx):ax
 	xchg	%ax,%di				# di = e
 	mov	(%di),%ax			# ax = Car(e)
 	cmp	$ATOM_QUOTE,%ax			# maybe CONS
-	je	Cadr
 	mov	2(%di),%di			# di = Cdr(e)
+	je	.retA
 	cmp	$ATOM_COND,%ax
 	je	Evcon
 .Ldflt2:push	%ax				# save 2
@@ -267,23 +269,6 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 	xchg	%ax,%dx
 	pop	%di				# restore 1
 	jmp	.EvCadr
-.switch:cmp	$ATOM_EQ,%ax
-	ja	.dflt1
-	mov	(%si),%di			# di = Car(x)
-.ifCar:	cmp	$ATOM_CAR,%al
-	jne	.ifCdr
-	mov	(%di),%ax
-	ret
-.ifCdr:	cmp	$ATOM_CDR,%al
-	jne	.ifAtom
-	mov	2(%di),%ax
-	ret
-.ifAtom:cmp	$ATOM_ATOM,%al
-	jne	.ifCons
-	test	$1,%di
-	jnz	.retT
-.retF:	mov	$NIL,%ax			# ax = NIL
-	ret
 .ifCons:mov	2(%si),%si			# si = Cdr(x)
 	mov	(%si),%si			# si = Cadr(x)
 	cmp	$ATOM_CONS,%al
@@ -292,6 +277,20 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 	jne	.retF
 .retT:	mov	$ATOM_T,%al			# ax = ATOM_T
 	ret
+.switch:cmp	$ATOM_EQ,%ax
+	ja	.dflt1
+	mov	(%si),%di			# di = Car(x)
+.ifCar:	cmp	$ATOM_CAR,%al
+	je	.retA
+.ifCdr:	cmp	$ATOM_CDR,%al
+	cmove	2(%di),%ax
+	je	.retD
+.ifAtom:cmp	$ATOM_ATOM,%al
+	jne	.ifCons
+	test	$1,%di
+	jnz	.retT
+.retF:	mov	$NIL,%ax			# ax = NIL
+.retD:	ret
 .dflt1:	push	%si				# save x
 	push	%dx				# save a
 	call	Eval
@@ -300,19 +299,16 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 	jmp	Apply
 
 Cadr:	mov	2(%di),%di			# contents of decrement register
-	mov	(%di),%ax			# contents of address register
+.retA:	mov	(%di),%ax			# contents of address register
 	ret
 
-assoc1:	mov	2(%si),%dx			# dx = Cdr(y)
-#	jmp	Assoc
-
+1:	mov	2(%si),%dx			# dx = Cdr(y)
 Assoc:	cmp	$NIL,%dx			# Assoc(x:ax,y:dx):ax
 	mov	%dx,%si
 	je	.retF
 	mov	(%si),%bx			# bx = Car(y)
-	mov	(%bx),%cx			# cx = Caar(y)
-	cmp	%cx,%ax
-	jne	assoc1
+	cmp	%ax,(%bx)			# (%bx) = Caar(y)
+	jne	1b
 	mov	2(%bx),%ax			# ax = Cdar(y)
 	ret
 
