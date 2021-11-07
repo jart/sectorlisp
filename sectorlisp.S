@@ -20,6 +20,7 @@
 
 // LISP meta-circular evaluator in a MBR
 
+.set ONE,		%bp
 .set NIL,		1
 .set ATOM_T,		9
 .set ATOM_QUOTE,	13
@@ -36,6 +37,10 @@
 .set boot,	0x7c00
 
 ////////////////////////////////////////////////////////////////////////////////
+// Currently requires i686+ in real mode
+// Can be easily tuned for the IBM PC XT
+// Quoth xed -r -isa-set -i sectorlisp.o
+
 .section .text,"ax",@progbits
 .globl	_start
 .code16
@@ -64,10 +69,11 @@ _begin:	push	%cs				# memory model cs=ds=es = 0x600
 	mov	$g_mem,%ax
 	mov	%ax,%fs				# fs = &g_mem
 	rep stosb				# clears our bss memory
+	mov	$NIL,ONE
 main:	mov	$'\n',%dl
 	call	GetToken
 	call	GetObject
-	mov	$NIL,%dx
+	mov	ONE,%dx
 	call	Eval
 	call	PrintObject
 	mov	$'\r',%al
@@ -118,7 +124,7 @@ PrintObject:					# PrintObject(x:ax)
 	mov	(%di),%di			# di = Car(x)
 	call	.PutObject
 	pop	%ax				# restore 1
-	cmp	$NIL,%ax
+	cmp	ONE,%ax
 	je	4f
 	test	$1,%al
 	xchg	%ax,%di
@@ -179,8 +185,8 @@ PutChar:
 
 ////////////////////////////////////////////////////////////////////////////////
 
-Pairlis:cmp	$NIL,%di			# Pairlis(x:di,y:si,a:dx):ax
-	je	1f
+Pairlis:cmp	ONE,%di				# Pairlis(x:di,y:si,a:dx):ax
+	je	1f				# it's zip() basically
 	push	2(%di)				# save 1 Cdr(x)
 	lodsw
 	push	(%si)				# save 2 Cdr(y)
@@ -197,7 +203,7 @@ Pairlis:cmp	$NIL,%di			# Pairlis(x:di,y:si,a:dx):ax
 1:	xchg	%dx,%ax
 	ret
 
-Evlis:	cmp	$NIL,%di			# Evlis(m:di,a:dx):ax
+Evlis:	cmp	ONE,%di				# Evlis(m:di,a:dx):ax
 	je	1f
 	push	2(%di)				# save 1 Cdr(m)
 	mov	(%di),%ax
@@ -238,7 +244,7 @@ Evcon:	push	%di				# save c
 	call	Eval
 	pop	%dx				# restore a
 	pop	%di				# restore c
-	cmp	$NIL,%ax
+	cmp	ONE,%ax
 	jz	1b
 	mov	(%di),%di			# di = Car(c)
 .EvCadr:call	Cadr				# ax = Cadar(c)
@@ -283,13 +289,13 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 .ifCar:	cmp	$ATOM_CAR,%al
 	je	.retA
 .ifCdr:	cmp	$ATOM_CDR,%al
-	cmove	2(%di),%ax
+	cmove	2(%di),%ax			# i686+
 	je	.retD
 .ifAtom:cmp	$ATOM_ATOM,%al
 	jne	.ifCons
-	test	$1,%di
+	test	ONE,%di
 	jnz	.retT
-.retF:	mov	$NIL,%ax			# ax = NIL
+.retF:	mov	ONE,%ax				# ax = NIL
 .retD:	ret
 .dflt1:	push	%si				# save x
 	push	%dx				# save a
@@ -303,7 +309,7 @@ Cadr:	mov	2(%di),%di			# contents of decrement register
 	ret
 
 1:	mov	2(%si),%dx			# dx = Cdr(y)
-Assoc:	cmp	$NIL,%dx			# Assoc(x:ax,y:dx):ax
+Assoc:	cmp	ONE,%dx				# Assoc(x:ax,y:dx):ax
 	mov	%dx,%si
 	je	.retF
 	mov	(%si),%bx			# bx = Car(y)
