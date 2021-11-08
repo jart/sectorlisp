@@ -137,7 +137,7 @@ void PrintChar(unsigned char b) {
   if (write(1, &b, 1) == -1) exit(1);
 }
 
-void PrintString(char *s) {
+void PrintString(const char *s) {
   char c;
   for (;;) {
     if (!(c = s[0])) break;

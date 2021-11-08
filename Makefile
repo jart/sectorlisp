@@ -22,7 +22,7 @@ sectorlisp.o: sectorlisp.S
 	$(AS) -g -mtune=i386 -o $@ $<
 
 sectorlisp.bin.dbg: sectorlisp.o
-	$(LD) -oformat:binary -Ttext=0x7600 -o $@ $<
+	$(LD) -oformat:binary -Ttext=0x0000 -o $@ $<
 
 sectorlisp.bin: sectorlisp.bin.dbg
 	objcopy -S -O binary sectorlisp.bin.dbg sectorlisp.bin

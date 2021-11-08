@@ -3,6 +3,7 @@
 ╞══════════════════════════════════════════════════════════════════════════════╡
 │ Copyright 2020 Justine Alexandra Roberts Tunney                              │
 │ Copyright 2021 Alain Greppin                                                 │
+│ Some size optimisations by Peter Ferrie                                      │
 │                                                                              │
 │ Permission to use, copy, modify, and/or distribute this software for         │
 │ any purpose with or without fee is hereby granted, provided that the         │
@@ -22,18 +23,18 @@
 
 .set ONE,		%bp
 .set NIL,		1
-.set ATOM_T,		9
-.set ATOM_QUOTE,	13
-.set ATOM_COND,		25
-.set ATOM_ATOM,		35
-.set ATOM_CAR,		45
-.set ATOM_CDR,		53
-.set ATOM_CONS,		61
-.set ATOM_EQ,		71
+.set ATOM_T,		23
+.set ATOM_QUOTE,	27
+.set ATOM_COND,		39
+.set ATOM_ATOM,		49
+.set ATOM_CAR,		59
+.set ATOM_CDR,		67
+.set ATOM_CONS,		75
+.set ATOM_EQ,		85
 
 .set g_token,	0x7800
 .set g_str,	0x0
-.set g_mem,	0x3600
+.set g_mem,	0x8000
 .set boot,	0x7c00
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -45,30 +46,27 @@
 .globl	_start
 .code16
 
-_start:	jmp	.init				# some bios scan for short jump
+_start:	
 .type kSymbols,@object;
 kSymbols:
-	.ascii "NIL\0T\0QUOTE\0COND\0ATOM\0CAR\0CDR\0CONS\0EQ"
-
+	.ascii "NIL\0\xC0"
 .type .init,@function
-.init:	ljmp	$0x600>>4,$_begin		# end of bios data roundup page
-_begin:	push	%cs				# memory model cs=ds=es = 0x600
+.init:	ljmp	$0x7c00>>4,$_begin
+	.ascii "\0T\0QUOTE\0COND\0ATOM\0CAR\0CDR\0CONS\0EQ\0"
+
+_begin:	mov	$g_mem,%cx
+	mov	%cx,%fs				# fs = &g_mem
+	xor	%ax,%ax
+	mov	%cx,%di
+	cld
+	rep stosb				# clears our bss memory
+	push	%cs				# memory model cs=ds=es = 0x7c0
 	push	%cs
 	push	%cs
 	pop	%ds
 	pop	%es
-	mov	$kSymbols,%si
-	push	%si
-	xor	%di,%di				# mov g_str, %di
-	mov	$37,%cx
-	cld
-	rep movsb
-	pop	%cx
 	pop	%ss
 	mov	%cx,%sp
-	mov	$g_mem,%ax
-	mov	%ax,%fs				# fs = &g_mem
-	rep stosb				# clears our bss memory
 	mov	$NIL,ONE
 main:	mov	$'\n',%dl
 	call	GetToken
@@ -81,7 +79,7 @@ main:	mov	$'\n',%dl
 	jmp	main
 
 GetToken:					# GetToken():al, dl is g_look
-	mov	$g_token,%di
+	mov	%fs,%di				# mov $g_token,%di
 	mov	%di,%si
 1:	mov	%dl,%al
 	cmp	$' ',%al
@@ -149,7 +147,7 @@ GetObject:					# called just after GetToken
 	jne	1b
 	jmp	5f
 2:	pop	%si				# drop 1
-	mov	$g_token,%si
+	mov	%fs,%si				# mov $g_token,%si
 3:	scasb
 	jne	3b
 	cmp	(%di),%al
@@ -181,7 +179,7 @@ PutChar:
 	cmp	$'\r',%al			# don't clobber stuff
 	jne	.ret
 	mov	$'\n',%al
-	jmp	PutChar				# bx volatile, bp never used
+	jmp	PutChar				# bx volatile
 
 ////////////////////////////////////////////////////////////////////////////////
 
