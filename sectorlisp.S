@@ -67,7 +67,8 @@ _begin:	mov	$g_mem,%cx
 	pop	%es
 	pop	%ss
 	mov	%cx,%sp
-	mov	$NIL,ONE
+	inc	%ax
+	xchg	%ax,ONE				# mov $NIL,ONE
 main:	mov	$'\n',%dl
 	call	GetToken
 	call	GetObject
