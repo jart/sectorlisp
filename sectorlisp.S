@@ -38,7 +38,7 @@
 .set boot,	0x7c00
 
 ////////////////////////////////////////////////////////////////////////////////
-// Currently requires i686+ in real mode
+// Currently requires i386+ in real mode
 // Can be easily tuned for the IBM PC XT
 // Quoth xed -r -isa-set -i sectorlisp.o
 
@@ -288,14 +288,13 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 .ifCar:	cmp	$ATOM_CAR,%al
 	je	.retA
 .ifCdr:	cmp	$ATOM_CDR,%al
-	cmove	2(%di),%ax			# i686+
 	je	.retD
 .ifAtom:cmp	$ATOM_ATOM,%al
 	jne	.ifCons
 	test	ONE,%di
 	jnz	.retT
 .retF:	mov	ONE,%ax				# ax = NIL
-.retD:	ret
+	ret
 .dflt1:	push	%si				# save x
 	push	%dx				# save a
 	call	Eval
@@ -304,6 +303,8 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 	jmp	Apply
 
 Cadr:	mov	2(%di),%di			# contents of decrement register
+	.byte	0x3C				# mask next byte
+.retD:	scasw
 .retA:	mov	(%di),%ax			# contents of address register
 	ret
 
