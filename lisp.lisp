@@ -99,7 +99,7 @@ NIL
  (QUOTE (LAMBDA (M A)
           (COND ((EQ M ()) ())
                 ((QUOTE T) (CONS (EVAL (CAR M) A)
-                                 (EVLIS (CDR M) A A))))))
+                                 (EVLIS (CDR M) A))))))
  (QUOTE (LAMBDA (FN X A)
           (COND
             ((ATOM FN)
