@@ -241,7 +241,7 @@ void PrintList(int x) {
 #endif
   PrintChar('(');
   PrintObject(Car(x));
-  while ((x = Cdr(x))) {
+  while ((x = Cdr(x)) != NIL) {
     if (!ISATOM(x)) {
       PrintChar(' ');
       PrintObject(Car(x));
