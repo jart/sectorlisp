@@ -23,14 +23,14 @@
 
 .set ONE,		%bp
 .set NIL,		1
-.set ATOM_T,		23
-.set ATOM_QUOTE,	27
-.set ATOM_COND,		39
-.set ATOM_ATOM,		49
-.set ATOM_CAR,		59
-.set ATOM_CDR,		67
-.set ATOM_CONS,		75
-.set ATOM_EQ,		85
+.set ATOM_T,		9
+.set ATOM_QUOTE,	23
+.set ATOM_COND,		35
+.set ATOM_ATOM,		45
+.set ATOM_CAR,		55
+.set ATOM_CDR,		63
+.set ATOM_CONS,		71
+.set ATOM_EQ,		81
 
 .set g_token,	0x7800
 .set g_str,	0x0
@@ -49,22 +49,22 @@
 _start:	
 .type kSymbols,@object;
 kSymbols:
-	.ascii "NIL\0\xC0"
+	.ascii "NIL\0T\0"
 .type .init,@function
 .init:	ljmp	$0x7c00>>4,$_begin
-	.ascii "\0T\0QUOTE\0COND\0ATOM\0CAR\0CDR\0CONS\0EQ\0"
+	.ascii "QUOTE\0COND\0ATOM\0CAR\0CDR\0CONS\0EQ\0"
 
 _begin:	mov	$g_mem,%cx
 	mov	%cx,%fs				# fs = &g_mem
 	xor	%ax,%ax
 	mov	%cx,%di
-	cld
-	rep stosb				# clears our bss memory
 	push	%cs				# memory model cs=ds=es = 0x7c0
 	push	%cs
 	push	%cs
 	pop	%ds
 	pop	%es
+	cld
+	rep stosb				# clears our bss memory
 	pop	%ss
 	mov	%cx,%sp
 	inc	%ax
