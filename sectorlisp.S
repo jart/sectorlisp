@@ -20,6 +20,7 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 
 // LISP meta-circular evaluator in a MBR
+// Compatible with the original hardware
 
 .set ATOM_NIL,		(kNil-kSymbols)<<1|1
 .set ATOM_QUOTE,	(kQuote-kSymbols)<<1|1
@@ -37,11 +38,6 @@
 .set ZERO,		%ch
 .set ONE,		%cx
 .set TWO,		%bx
-
-////////////////////////////////////////////////////////////////////////////////
-// Currently requires i386+ in real mode
-// Can be easily tuned for the IBM PC XT
-// Quoth xed -r -isa-set -i sectorlisp.o
 
 .section .text,"ax",@progbits
 .type	kSymbols,@object
@@ -73,10 +69,10 @@ _begin:	push	%cs				# memory model ds=es=ss=cs
 	cld					# clear direction flag
 	rep stosb				# memset(0x8000,0,0x8000)
 	push	%ds				# cx is now zero
-#	cli					# disable interrupts
+	cli					# disable interrupts
 	pop	%ss				# disable nonmaskable interrupts
 	mov	%ax,%sp				# use null pointer as our stack
-#	sti					# enable interrupts
+	sti					# enable interrupts
 	inc	ONE				# ++cx
 	mov	ONE,TWO
 	inc	TWO
@@ -181,10 +177,10 @@ GetChar:
 						# ah is bios scancode
 						# al is ascii character
 PutChar:
-#	push	%bp				# original ibm pc scroll up bug
+	push	%bp				# original ibm pc scroll up bug
 	mov	$0x0e,%ah			# teletype output al cp437
 	int	$0x10				# vidya service
-#	pop	%bp				# preserves al
+	pop	%bp				# preserves al
 	cmp	$'\r',%al			# don't clobber stuff
 	jne	.ret
 	mov	$'\n',%al
