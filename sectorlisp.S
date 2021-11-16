@@ -22,20 +22,20 @@
 // LISP meta-circular evaluator in a MBR
 
 .set ONE,		%bp
-.set NIL,		1
-.set ATOM_T,		9
-.set ATOM_QUOTE,	23
-.set ATOM_COND,		35
-.set ATOM_ATOM,		45
-.set ATOM_CAR,		55
-.set ATOM_CDR,		63
-.set ATOM_CONS,		71
-.set ATOM_EQ,		81
+.set ATOM_NIL,		(kNil-kSymbols)<<1|1
+.set ATOM_QUOTE,	(kQuote-kSymbols)<<1|1
+.set ATOM_COND,		(kCond-kSymbols)<<1|1
+.set ATOM_ATOM,		(kAtom-kSymbols)<<1|1
+.set ATOM_CAR,		(kCar-kSymbols)<<1|1
+.set ATOM_CDR,		(kCdr-kSymbols)<<1|1
+.set ATOM_EQ,		(kEq-kSymbols)<<1|1
+.set ATOM_CONS,		(kCons-kSymbols)<<1|1
+.set ATOM_T,		(kT-kSymbols)<<1|1
 
-.set g_token,	0x7800
-.set g_str,	0x0
-.set g_mem,	0x8000
-.set boot,	0x7c00
+.set g_str,		0x0
+.set g_token,		0x7800
+.set boot,		0x7c00
+.set g_mem,		0x8000
 
 ////////////////////////////////////////////////////////////////////////////////
 // Currently requires i386+ in real mode
@@ -43,32 +43,41 @@
 // Quoth xed -r -isa-set -i sectorlisp.o
 
 .section .text,"ax",@progbits
+.type	kSymbols,@object
+.type	_begin,@function
 .globl	_start
 .code16
 
-_start:	
-.type kSymbols,@object;
+_start:
 kSymbols:
-	.ascii "NIL\0T\0"
-.type .init,@function
-.init:	ljmp	$0x7c00>>4,$_begin
-	.ascii "QUOTE\0COND\0ATOM\0CAR\0CDR\0CONS\0EQ\0"
-
+kNil:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
+kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
+	ljmp	$0x7c00>>4,$_begin		# cs = 0x7c00 is boot address
+	.asciz	""				# x86 prog part of intern tab
+kQuote:	.asciz	"QUOTE"
+kCond:	.asciz	"COND"
+kAtom:	.asciz	"ATOM"
+kCar:	.asciz	"CAR"
+kCdr:	.asciz	"CDR"
+kCons:	.asciz	"CONS"
+kEq:	.asciz	"EQ"				# needs to be last
 _begin:	mov	$g_mem,%cx
 	mov	%cx,%fs				# fs = &g_mem
-	xor	%ax,%ax
 	mov	%cx,%di
-	push	%cs				# memory model cs=ds=es = 0x7c0
-	push	%cs
-	push	%cs
+	push	%cs				# memory model ds=es=ss=cs
 	pop	%ds
+	push	%cs
 	pop	%es
-	cld
-	rep stosb				# clears our bss memory
-	pop	%ss
-	mov	%cx,%sp
+	xor	%ax,%ax
+	cld					# clear direction flag
+	rep stosb				# memset(0x8000,0,0x8000)
+	push	%ds				# cx is now zero
+#	cli					# disable interrupts
+	pop	%ss				# disable nonmaskable interrupts
+	mov	%ax,%sp				# use null pointer as our stack
+#	sti					# enable interrupts
 	inc	%ax
-	xchg	%ax,ONE				# mov $NIL,ONE
+	xchg	%ax,ONE				# bp = 1
 main:	mov	$'\n',%dl
 	call	GetToken
 	call	GetObject
@@ -80,7 +89,7 @@ main:	mov	$'\n',%dl
 	jmp	main
 
 GetToken:					# GetToken():al, dl is g_look
-	mov	%fs,%di				# mov $g_token,%di
+	mov	%fs,%di				# di = g_token
 	mov	%di,%si
 1:	mov	%dl,%al
 	cmp	$' ',%al
@@ -138,7 +147,7 @@ GetObject:					# called just after GetToken
 	cmpb	$'(',%al
 	je	GetList
 .Intern:
-	xor	%di,%di				# mov $g_str,%di
+	xor	%di,%di				# di = g_str
 	xor	%al,%al
 0:	push	%di				# save 1
 1:	cmpsb
@@ -148,7 +157,7 @@ GetObject:					# called just after GetToken
 	jne	1b
 	jmp	5f
 2:	pop	%si				# drop 1
-	mov	%fs,%si				# mov $g_token,%si
+	mov	%fs,%si				# si = g_token
 3:	scasb
 	jne	3b
 	cmp	(%di),%al
@@ -159,7 +168,7 @@ GetObject:					# called just after GetToken
 	scasb
 	jnz	4b
 5:	pop	%ax				# restore 1
-#	add	$-g_str,%ax
+//	add	$-g_str,%ax
 	add	%ax,%ax				# ax = 2 * ax
 	inc	%ax				# + 1
 .ret:	ret
@@ -170,13 +179,11 @@ GetChar:
 						# ah is bios scancode
 						# al is ascii character
 PutChar:
-#	push	%bx				# don't clobber di,si,cx,dx
 #	push	%bp				# original ibm pc scroll up bug
 	xor	%bx,%bx				# normal mda/cga style page zero
 	mov	$0x0e,%ah			# teletype output al cp437
 	int	$0x10				# vidya service
 #	pop	%bp				# preserves al
-#	pop	%bx
 	cmp	$'\r',%al			# don't clobber stuff
 	jne	.ret
 	mov	$'\n',%al
@@ -250,12 +257,12 @@ Evcon:	push	%di				# save c
 #	jmp	Eval
 
 Eval:	test	$1,%al				# Eval(e:ax,a:dx):ax
-	jnz	Assoc
-	xchg	%ax,%di				# di = e
-	mov	(%di),%ax			# ax = Car(e)
+	jnz	Assoc				# lookup val if atom
+	xchg	%ax,%si				# di = e
+	lodsw					# ax = Car(e)
 	cmp	$ATOM_QUOTE,%ax			# maybe CONS
-	mov	2(%di),%di			# di = Cdr(e)
-	je	.retA
+	mov	(%si),%di			# di = Cdr(e)
+	je	Car
 	cmp	$ATOM_COND,%ax
 	je	Evcon
 .Ldflt2:push	%ax				# save 2
@@ -282,18 +289,18 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 	jne	.retF
 .retT:	mov	$ATOM_T,%al			# ax = ATOM_T
 	ret
-.switch:cmp	$ATOM_EQ,%ax
-	ja	.dflt1
+.switch:cmp	$ATOM_EQ,%ax			# eq is last builtin atom
+	ja	.dflt1				# ah is zero if not above
 	mov	(%si),%di			# di = Car(x)
 .ifCar:	cmp	$ATOM_CAR,%al
-	je	.retA
+	je	Car
 .ifCdr:	cmp	$ATOM_CDR,%al
-	je	.retD
+	je	Cdr
 .ifAtom:cmp	$ATOM_ATOM,%al
 	jne	.ifCons
 	test	ONE,%di
 	jnz	.retT
-.retF:	mov	ONE,%ax				# ax = NIL
+.retF:	mov	ONE,%ax				# ax = ATOM_NIL
 	ret
 .dflt1:	push	%si				# save x
 	push	%dx				# save a
@@ -303,18 +310,18 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 	jmp	Apply
 
 Cadr:	mov	2(%di),%di			# contents of decrement register
-	.byte	0x3C				# mask next byte
-.retD:	scasw
-.retA:	mov	(%di),%ax			# contents of address register
+	.byte	0x3C				# cmp §scasw,%al (nop next byte)
+Cdr:	scasw					# increments our data index by 2
+Car:	mov	(%di),%ax			# contents of address register!!
 	ret
 
-1:	mov	2(%si),%dx			# dx = Cdr(y)
+.Assoc:	mov	2(%si),%dx			# dx = Cdr(y)
 Assoc:	cmp	ONE,%dx				# Assoc(x:ax,y:dx):ax
 	mov	%dx,%si
 	je	.retF
 	mov	(%si),%bx			# bx = Car(y)
 	cmp	%ax,(%bx)			# (%bx) = Caar(y)
-	jne	1b
+	jne	.Assoc
 	mov	2(%bx),%ax			# ax = Cdar(y)
 	ret
 
