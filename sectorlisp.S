@@ -22,15 +22,15 @@
 // LISP meta-circular evaluator in a MBR
 // Compatible with the original hardware
 
-.set ATOM_NIL,		(kNil-kSymbols)<<1|1
-.set ATOM_QUOTE,	(kQuote-kSymbols)<<1|1
-.set ATOM_COND,		(kCond-kSymbols)<<1|1
-.set ATOM_ATOM,		(kAtom-kSymbols)<<1|1
-.set ATOM_CAR,		(kCar-kSymbols)<<1|1
-.set ATOM_CDR,		(kCdr-kSymbols)<<1|1
-.set ATOM_EQ,		(kEq-kSymbols)<<1|1
-.set ATOM_CONS,		(kCons-kSymbols)<<1|1
-.set ATOM_T,		(kT-kSymbols)<<1|1
+.set ATOM_NIL,		(kNil-kNil)<<1|1
+.set ATOM_QUOTE,	(kQuote-kNil)<<1|1
+.set ATOM_COND,		(kCond-kNil)<<1|1
+.set ATOM_ATOM,		(kAtom-kNil)<<1|1
+.set ATOM_CAR,		(kCar-kNil)<<1|1
+.set ATOM_CDR,		(kCdr-kNil)<<1|1
+.set ATOM_EQ,		(kEq-kNil)<<1|1
+.set ATOM_CONS,		(kCons-kNil)<<1|1
+.set ATOM_T,		(kT-kNil)<<1|1
 
 .set g_str,		0x0
 .set g_token,		%bp
@@ -40,16 +40,24 @@
 .set TWO,		%bx
 
 .section .text,"ax",@progbits
-.type	kSymbols,@object
-.type	_begin,@function
+.type	kNil,@object
+.type	kT,@object
+.type	kQuote,@object
+.type	kCond,@object
+.type	kAtom,@object
+.type	kCar,@object
+.type	kCdr,@object
+.type	kCons,@object
+.type	kEq,@object
+.type	begin,@function
+.type	start,@function
 .globl	_start
 .code16
 
 _start:
-kSymbols:
 kNil:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
 kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
-	ljmp	$0x7c00>>4,$_begin		# cs = 0x7c00 is boot address
+start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
 	.asciz	""				# x86 prog part of intern tab
 kQuote:	.asciz	"QUOTE"
 kCond:	.asciz	"COND"
@@ -58,7 +66,7 @@ kCar:	.asciz	"CAR"
 kCdr:	.asciz	"CDR"
 kCons:	.asciz	"CONS"
 kEq:	.asciz	"EQ"				# needs to be last
-_begin:	push	%cs				# memory model ds=es=ss=cs
+begin:	push	%cs				# memory model ds=es=ss=cs
 	pop	%ds
 	push	%cs
 	pop	%es
