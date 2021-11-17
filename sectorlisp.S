@@ -22,21 +22,9 @@
 // LISP meta-circular evaluator in a MBR
 // Compatible with the original hardware
 
-.set ATOM_NIL,		(kNil-kNil)<<1|1
-.set ATOM_QUOTE,	(kQuote-kNil)<<1|1
-.set ATOM_COND,		(kCond-kNil)<<1|1
-.set ATOM_ATOM,		(kAtom-kNil)<<1|1
-.set ATOM_CAR,		(kCar-kNil)<<1|1
-.set ATOM_CDR,		(kCdr-kNil)<<1|1
-.set ATOM_EQ,		(kEq-kNil)<<1|1
-.set ATOM_CONS,		(kCons-kNil)<<1|1
-.set ATOM_T,		(kT-kNil)<<1|1
-
-.set g_str,		0x0
 .set g_token,		%bp
 .set g_mem,		%bp
-.set ZERO,		%ch
-.set ONE,		%cx
+.set ZERO,		%bh
 .set TWO,		%bx
 
 .section .text,"ax",@progbits
@@ -49,8 +37,8 @@
 .type	kCdr,@object
 .type	kCons,@object
 .type	kEq,@object
-.type	begin,@function
 .type	start,@function
+.type	begin,@function
 .globl	_start
 .code16
 
@@ -58,37 +46,34 @@ _start:
 kNil:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
 kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
 start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
-	.asciz	""				# x86 prog part of intern tab
+	.asciz	""
 kQuote:	.asciz	"QUOTE"
 kCond:	.asciz	"COND"
-kAtom:	.asciz	"ATOM"
-kCar:	.asciz	"CAR"
-kCdr:	.asciz	"CDR"
-kCons:	.asciz	"CONS"
+kAtom:	.asciz	"ATOM"				# ordering matters
+kCar:	.asciz	"CAR"				# ordering matters
+kCdr:	.asciz	"CDR"				# ordering matters
+kCons:	.asciz	"CONS"				# ordering matters
 kEq:	.asciz	"EQ"				# needs to be last
-begin:	push	%cs				# memory model ds=es=ss=cs
+
+begin:	xor	%ax,%ax
+	push	%cs				# memory model ds=es=ss=cs
 	pop	%ds
 	push	%cs
 	pop	%es
-	mov	$0x8000,%cx
-	mov	%cx,g_mem
-	mov	%cx,%di
-	xor	%ax,%ax
-	cld					# clear direction flag
-	rep stosb				# memset(0x8000,0,0x8000)
-	push	%ds				# cx is now zero
+	push	%cs
 	cli					# disable interrupts
 	pop	%ss				# disable nonmaskable interrupts
 	mov	%ax,%sp				# use null pointer as our stack
 	sti					# enable interrupts
-	inc	ONE				# ++cx
-	mov	ONE,TWO
-	inc	TWO
+	mov	$2,TWO
+	mov	$Eval,%cx
+	mov	$0x8000,g_mem
 main:	mov	$'\n',%dl
 	call	GetToken
 	call	GetObject
-	mov	ONE,%dx				# dx = NIL
-	call	Eval
+	xor	%dx,%dx
+	call	*%cx				# call Eval
+	xchg	%ax,%di
 	call	PrintObject
 	mov	$'\r',%al
 	call	PutChar
@@ -116,19 +101,14 @@ GetToken:					# GetToken():al, dl is g_look
 
 .PutObject:					# .PutObject(c:al,x:di)
 	call	PutChar				# preserves di
-	xchg	%di,%ax
-#	jmp	PrintObject
-
-PrintObject:					# PrintObject(x:ax)
-	test	$1,%al
-	xchg	%ax,%di
-	jz	.PrintList
+PrintObject:					# PrintObject(x:di)
+	test	%di,%di				# set sf=1 if cons
+	js	.PrintList			# jump if cons
 .PrintAtom:
-	shr	%di
 	mov	%di,%si				# lea g_str(%di),%si
 .PrintString:					# nul-terminated in si
 	lodsb
-	test	%al,%al
+	test	%al,%al				# test for nul terminator
 	jz	.ret				# -> ret
 	call	PutChar
 	jmp	.PrintString
@@ -138,12 +118,11 @@ PrintObject:					# PrintObject(x:ax)
 	mov	(%di),%di			# di = Car(x)
 	call	.PutObject
 	pop	%ax				# restore 1
-	cmp	ONE,%ax
-	je	4f
-	test	$1,%al
+	test	%ax,%ax
+	jz	4f				# jump if nil
 	xchg	%ax,%di
 	mov	$' ',%al
-	jz	2b
+	js	2b				# jump if cons
 	mov	$249,%al			# bullet (A∙B)
 	call	.PutObject
 4:	mov	$')',%al
@@ -174,9 +153,6 @@ GetObject:					# called just after GetToken
 	scasb
 	jnz	4b
 5:	pop	%ax				# restore 1
-//	add	$-g_str,%ax
-	add	%ax,%ax				# ax = 2 * ax
-	inc	%ax				# + 1
 .ret:	ret
 
 GetChar:
@@ -196,8 +172,8 @@ PutChar:
 
 ////////////////////////////////////////////////////////////////////////////////
 
-Pairlis:cmp	ONE,%di				# Pairlis(x:di,y:si,a:dx):ax
-	je	1f				# it's zip() basically
+Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):ax
+	jz	1f				# jump if nil
 	push	(TWO,%di)			# save 1 Cdr(x)
 	lodsw
 	push	(%si)				# save 2 Cdr(y)
@@ -212,12 +188,12 @@ Pairlis:cmp	ONE,%di				# Pairlis(x:di,y:si,a:dx):ax
 1:	xchg	%dx,%ax
 	ret
 
-Evlis:	cmp	ONE,%di				# Evlis(m:di,a:dx):ax
-	je	1f
+Evlis:	test	%di,%di				# Evlis(m:di,a:dx):ax
+	jz	1f				# jump if nil
 	push	(TWO,%di)			# save 1 Cdr(m)
 	mov	(%di),%ax
 	push	%dx				# save a
-	call	Eval
+	call	*%cx				# call Eval
 	pop	%dx				# restore a
 	pop	%di				# restore 1
 	push	%ax				# save 2
@@ -247,23 +223,23 @@ Evcon:	push	%di				# save c
 	mov	(%di),%si			# di = Car(c)
 	lodsw					# ax = Caar(c)
 	push	%dx				# save a
-	call	Eval
+	call	*%cx				# call Eval
 	pop	%dx				# restore a
 	pop	%di				# restore c
-	cmp	ONE,%ax
+	test	%ax,%ax				# nil test
 	jz	1b
 	mov	(%di),%di			# di = Car(c)
 .EvCadr:call	Cadr				# ax = Cadar(c)
 #	jmp	Eval
 
-Eval:	test	$1,%al				# Eval(e:ax,a:dx):ax
-	jnz	Assoc				# lookup val if atom
+Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
+	jns	Assoc				# lookup val if atom
 	xchg	%ax,%si				# di = e
 	lodsw					# ax = Car(e)
-	cmp	$ATOM_QUOTE,%ax			# maybe CONS
+	cmp	$kQuote,%ax			# maybe CONS
 	mov	(%si),%di			# di = Cdr(e)
 	je	Car
-	cmp	$ATOM_COND,%ax
+	cmp	$kCond,%ax
 	je	Evcon
 .Ldflt2:push	%ax				# save 2
 	call	Evlis				# preserves dx
@@ -271,8 +247,8 @@ Eval:	test	$1,%al				# Eval(e:ax,a:dx):ax
 	pop	%ax				# restore 2
 #	jmp	Apply
 
-Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
-	jnz	.switch
+Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
+	jns	.switch				# jump if atom
 	xchg	%ax,%di				# di = fn
 .lambda:mov	(TWO,%di),%di			# di = Cdr(fn)
 	push	%di				# save 1
@@ -281,30 +257,30 @@ Apply:	test	$1,%al				# Apply(fn:ax,x:si:a:dx):ax
 	xchg	%ax,%dx
 	pop	%di				# restore 1
 	jmp	.EvCadr
-.ifCons:cmp	$ATOM_CONS,%al
+.ifCons:cmp	$kCons,%al
 	mov	(TWO,%si),%si			# si = Cdr(x)
 	lodsw					# si = Cadr(x)
 	je	Cons
-.isEq:	cmp	%di,%ax
+.isEq:	cmp	%di,%ax				# we know for certain it's eq
 	jne	.retF
-.retT:	mov	$ATOM_T,%al			# ax = ATOM_T
+.retT:	mov	$kT,%ax
 	ret
-.switch:cmp	$ATOM_EQ,%ax			# eq is last builtin atom
+.switch:cmp	$kEq,%ax			# eq is last builtin atom
 	ja	.dflt1				# ah is zero if not above
 	mov	(%si),%di			# di = Car(x)
-.ifCar:	cmp	$ATOM_CAR,%al
+.ifCar:	cmp	$kCar,%al
 	je	Car
-.ifCdr:	cmp	$ATOM_CDR,%al
+.ifCdr:	cmp	$kCdr,%al
 	je	Cdr
-.ifAtom:cmp	$ATOM_ATOM,%al
+.ifAtom:cmp	$kAtom,%al
 	jne	.ifCons
-	test	ONE,%di
-	jnz	.retT
-.retF:	mov	ONE,%ax				# ax = ATOM_NIL
+	test	%di,%di				# test if atom
+	jns	.retT
+.retF:	xor	%ax,%ax				# ax = nil
 	ret
 .dflt1:	push	%si				# save x
 	push	%dx				# save a
-	call	Eval
+	call	*%cx				# call Eval
 	pop	%dx				# restore a
 	pop	%si				# restore x
 	jmp	Apply
@@ -316,9 +292,9 @@ Car:	mov	(%di),%ax			# contents of address register!!
 	ret
 
 .Assoc:	mov	(TWO,%si),%dx			# dx = Cdr(y)
-Assoc:	cmp	ONE,%dx				# Assoc(x:ax,y:dx):ax
-	mov	%dx,%si
-	je	.retF
+Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
+	test	%dx,%dx				# nil test
+	jz	.retF
 	mov	(%si),%di			# bx = Car(y)
 	cmp	%ax,(%di)			# (%di) = Caar(y)
 	jne	.Assoc

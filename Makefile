@@ -19,7 +19,7 @@ lisp.o: lisp.c bestline.h
 bestline.o: bestline.c bestline.h
 
 sectorlisp.o: sectorlisp.S
-	$(AS) -g -mtune=i386 -o $@ $<
+	$(AS) -g -o $@ $<
 
 sectorlisp.bin.dbg: sectorlisp.o
 	$(LD) -oformat:binary -Ttext=0x0000 -o $@ $<
