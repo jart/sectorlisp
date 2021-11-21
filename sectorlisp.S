@@ -65,6 +65,7 @@ begin:	xor	%ax,%ax
 	pop	%ss				# disable nonmaskable interrupts
 	mov	%ax,%sp				# use null pointer as our stack
 	sti					# enable interrupts
+	cld					# direction forward
 	mov	$2,TWO
 	mov	$Eval,%cx
 	mov	$0x8000,g_mem
@@ -183,8 +184,7 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):ax
 	pop	%di				# restore 1
 	push	%ax				# save 3
 	call	Pairlis
-	pop	%di				# restore 3
-	jmp	Cons				# can be inlined here
+	jmp	xCons				# can be inlined here
 1:	xchg	%dx,%ax
 	ret
 
