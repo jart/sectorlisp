@@ -22,8 +22,8 @@
 // LISP meta-circular evaluator in a MBR
 // Compatible with the original hardware
 
-.set g_token,		%bp
-.set g_mem,		%bp
+.set g_mem,		%cx
+.set g_token,		%cx
 .set ZERO,		%bh
 .set TWO,		%bx
 
@@ -67,13 +67,12 @@ begin:	xor	%ax,%ax
 	sti					# enable interrupts
 	cld					# direction forward
 	mov	$2,TWO
-	mov	$Eval,%cx
-	mov	$0x8000,g_mem
 main:	mov	$'\n',%dl
+	mov	$0x8000,g_mem
 	call	GetToken
 	call	GetObject
 	xor	%dx,%dx
-	call	*%cx				# call Eval
+	call	Eval
 	xchg	%ax,%di
 	call	PrintObject
 	mov	$'\r',%al
@@ -162,14 +161,12 @@ GetChar:
 						# ah is bios scancode
 						# al is ascii character
 PutChar:
-	push	%bp				# original ibm pc scroll up bug
 	mov	$0x0e,%ah			# teletype output al cp437
 	int	$0x10				# vidya service
-	pop	%bp				# preserves al
-	cmp	$'\r',%al			# don't clobber stuff
+	cmp	$'\r',%al			# don't clobber
 	jne	.ret
 	mov	$'\n',%al
-	jmp	PutChar				# bx volatile
+	jmp	PutChar
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -192,9 +189,7 @@ Evlis:	test	%di,%di				# Evlis(m:di,a:dx):ax
 	jz	1f				# jump if nil
 	push	(TWO,%di)			# save 1 Cdr(m)
 	mov	(%di),%ax
-	push	%dx				# save a
-	call	*%cx				# call Eval
-	pop	%dx				# restore a
+	call	Eval
 	pop	%di				# restore 1
 	push	%ax				# save 2
 	call	Evlis
@@ -210,6 +205,19 @@ Cons:	xchg	%ax,%si				# Cons(m:di,a:ax):ax
 1:	xchg	%di,%ax
 	ret
 
+Gc:	cmp	%dx,%di				# Gc(x:di,mark:dx,aj:bp):ax
+	jb	1b				# we assume immutable cells
+	push	(TWO,%di)			# mark prevents negative gc
+	mov	(%di),%di
+	call	Gc
+	pop	%di
+	push	%ax
+	call	Gc
+	pop	%di
+	call	Cons
+	sub	%bp,%ax				# subtract adjustment
+	ret
+
 GetList:call	GetToken
 	cmpb	$')',%al
 	je	.retF
@@ -218,21 +226,7 @@ GetList:call	GetToken
 	call	GetList
 	jmp	xCons
 
-1:	mov	(TWO,%di),%di			# di = Cdr(c)
-Evcon:	push	%di				# save c
-	mov	(%di),%si			# di = Car(c)
-	lodsw					# ax = Caar(c)
-	push	%dx				# save a
-	call	*%cx				# call Eval
-	pop	%dx				# restore a
-	pop	%di				# restore c
-	test	%ax,%ax				# nil test
-	jz	1b
-	mov	(%di),%di			# di = Car(c)
-.EvCadr:call	Cadr				# ax = Cadar(c)
-#	jmp	Eval
-
-Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
+.Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax w/o gc
 	jns	Assoc				# lookup val if atom
 	xchg	%ax,%si				# di = e
 	lodsw					# ax = Car(e)
@@ -279,9 +273,7 @@ Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
 .retF:	xor	%ax,%ax				# ax = nil
 	ret
 .dflt1:	push	%si				# save x
-	push	%dx				# save a
-	call	*%cx				# call Eval
-	pop	%dx				# restore a
+	call	Eval
 	pop	%si				# restore x
 	jmp	Apply
 
@@ -301,7 +293,37 @@ Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
 	mov	(TWO,%di),%ax			# ax = Cdar(y)
 	ret
 
-.type .sig,@object;
+1:	mov	(TWO,%di),%di			# di = Cdr(c)
+Evcon:	push	%di				# save c
+	mov	(%di),%si			# di = Car(c)
+	lodsw					# ax = Caar(c)
+	call	Eval
+	pop	%di				# restore c
+	test	%ax,%ax				# nil test
+	jz	1b
+	mov	(%di),%di			# di = Car(c)
+.EvCadr:call	Cadr				# ax = Cadar(c)
+#	jmp	Eval
+
+Eval:	push	%dx				# Eval(e:ax,a:dx):ax w/ gc
+	push	g_mem				# with garbage collections
+	call	.Eval				# discards non-result cons
+	pop	%dx
+	push	g_mem
+	mov	g_mem,%bp
+	sub	%dx,%bp
+	xchg	%ax,%di
+	call	Gc
+	pop	%si
+	mov	%dx,%di
+	mov	g_mem,%cx
+	sub	%si,%cx
+	rep movsb
+	mov	%di,g_mem
+	pop	%dx
+	ret
+
+.type .sig,@object
 .sig:
 .fill 510 - (. - _start), 1, 0xce
 .word 0xAA55
