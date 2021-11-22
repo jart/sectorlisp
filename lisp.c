@@ -202,7 +202,6 @@ int AddList(int x) {
 int GetList(void) {
   GetToken();
 #if QUOTES
-  if (*g_token == '.') return ConsumeObject();
   if (*g_token == '\'') return AddList(GetQuote());
 #endif
   if (*g_token == ')') return NIL;
