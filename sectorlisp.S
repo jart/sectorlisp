@@ -311,8 +311,7 @@ Eval:	push	%dx				# Eval(e:ax,a:dx):ax w/ gc
 	call	Gc
 	pop	%si
 	mov	%dx,%di
-	mov	g_mem,%cx
-	sub	%si,%cx
+	sub	%si,%cx				# cx = g_mem - si
 	rep movsb
 	mov	%di,g_mem
 	pop	%dx
