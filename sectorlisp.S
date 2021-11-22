@@ -55,7 +55,7 @@ kCdr:	.asciz	"CDR"				# ordering matters
 kCons:	.asciz	"CONS"				# ordering matters
 kEq:	.asciz	"EQ"				# needs to be last
 
-begin:	xor	%ax,%ax
+begin:	xor	TWO,TWO
 	push	%cs				# memory model ds=es=ss=cs
 	pop	%ds
 	push	%cs
@@ -63,17 +63,17 @@ begin:	xor	%ax,%ax
 	push	%cs
 	cli					# disable interrupts
 	pop	%ss				# disable nonmaskable interrupts
-	mov	%ax,%sp				# use null pointer as our stack
+	mov	TWO,%sp				# use null pointer as our stack
 	sti					# enable interrupts
 	cld					# direction forward
-	mov	$2,TWO
-main:	mov	$'\n',%dl
-	mov	$0x8000,g_mem
+	inc	TWO
+	inc	TWO
+main:	mov	$0x8000,g_mem			# dl (g_look) is zero or cr
 	call	GetToken
 	call	GetObject
 	xor	%dx,%dx
 	call	Eval
-	xchg	%ax,%di
+	xchg	%ax,%si
 	call	PrintObject
 	mov	$'\r',%al
 	call	PutChar
@@ -81,52 +81,48 @@ main:	mov	$'\n',%dl
 
 GetToken:					# GetToken():al, dl is g_look
 	mov	g_token,%di
-	mov	%di,%si
 1:	mov	%dl,%al
 	cmp	$' ',%al
 	jbe	2f
 	stosb
 	xchg	%ax,%si
-2:	call	GetChar
-	xchg	%ax,%dx				# dl = g_look
+2:	call	GetChar				# exchanges dx and ax
 	cmp	$' ',%al
 	jbe	1b
 	cmp	$')',%al
 	jbe	3f
-	cmp	$')',%dl
+	cmp	$')',%dl			# dl = g_look
 	ja	1b
 3:	movb	ZERO,(%di)
 	xchg	%si,%ax
 	ret
 
-.PutObject:					# .PutObject(c:al,x:di)
-	call	PutChar				# preserves di
-PrintObject:					# PrintObject(x:di)
-	test	%di,%di				# set sf=1 if cons
-	js	.PrintList			# jump if cons
-.PrintAtom:
-	mov	%di,%si				# lea g_str(%di),%si
-.PrintString:					# nul-terminated in si
-	lodsb
-	test	%al,%al				# test for nul terminator
-	jz	.ret				# -> ret
-	call	PutChar
-	jmp	.PrintString
+.PutObject:					# .PutObject(c:al,x:si)
+	call	PutChar				# preserves si
+PrintObject:					# PrintObject(x:si)
+	test	%si,%si				# set sf=1 if cons
+	jns	.PrintAtom			# jump if cons
 .PrintList:
 	mov	$'(',%al
-2:	push	(TWO,%di)			# save 1 Cdr(x)
-	mov	(%di),%di			# di = Car(x)
+2:	push	(TWO,%si)
+	mov	(%si),%si
 	call	.PutObject
-	pop	%ax				# restore 1
-	test	%ax,%ax
-	jz	4f				# jump if nil
-	xchg	%ax,%di
 	mov	$' ',%al
+	pop	%si				# restore 1
+	test	%si,%si
 	js	2b				# jump if cons
+	jz	4f				# jump if nil
 	mov	$249,%al			# bullet (A∙B)
 	call	.PutObject
 4:	mov	$')',%al
 	jmp	PutChar
+.PrintString:					# nul-terminated in si
+	call	PutChar
+.PrintAtom:
+	lodsb
+	test	%al,%al				# test for nul terminator
+	jnz	.PrintString			# -> ret
+	ret
 
 GetObject:					# called just after GetToken
 	cmpb	$'(',%al
@@ -155,16 +151,15 @@ GetObject:					# called just after GetToken
 5:	pop	%ax				# restore 1
 .ret:	ret
 
-GetChar:
+GetChar:					# GetChar→al:dl
 	xor	%ax,%ax				# get keystroke
 	int	$0x16				# keyboard service
 						# ah is bios scancode
 						# al is ascii character
-PutChar:
-	mov	$0x0e,%ah			# teletype output al cp437
+PutChar:mov	$0x0e,%ah			# teletype output al cp437
 	int	$0x10				# vidya service
 	cmp	$'\r',%al			# don't clobber
-	jne	.ret
+	jne	1f				# xchg dx,ax and ret
 	mov	$'\n',%al
 	jmp	PutChar
 
@@ -193,6 +188,7 @@ Evlis:	test	%di,%di				# Evlis(m:di,a:dx):ax
 	pop	%di				# restore 1
 	push	%ax				# save 2
 	call	Evlis
+#	jmp	xCons
 
 xCons:	pop	%di				# restore 2
 Cons:	xchg	%ax,%si				# Cons(m:di,a:ax):ax
@@ -283,15 +279,14 @@ Cdr:	scasw					# increments our data index by 2
 Car:	mov	(%di),%ax			# contents of address register!!
 	ret
 
-.Assoc:	mov	(TWO,%si),%dx			# dx = Cdr(y)
-Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
+Assoc:	mov	%dx,%di				# Assoc(x:ax,y:dx):ax
 	test	%dx,%dx				# nil test
-	jz	.retF
-	mov	(%si),%di			# bx = Car(y)
-	cmp	%ax,(%di)			# (%di) = Caar(y)
-	jne	.Assoc
-	mov	(TWO,%di),%ax			# ax = Cdar(y)
-	ret
+	jz	.retF				# return nil if end of list
+	mov	(TWO,%di),%dx			# we assume Eval() saved dx
+	mov	(%di),%di
+	scasw
+	jne	Assoc
+	jmp	Car
 
 1:	mov	(TWO,%di),%di			# di = Cdr(c)
 Evcon:	push	%di				# save c
