@@ -20,232 +20,141 @@
 
 #ifndef __COSMOPOLITAN__
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <locale.h>
+#include <limits.h>
 #endif
-
-#define QUOTES 1     /* allow 'X shorthand for (QUOTE X) */
-#define FUNDEF 1     /* be friendly w/undefined behavior */
-#define TRACE  0     /* prints Eval() arguments / result */
 
 /*───────────────────────────────────────────────────────────────────────────│─╗
 │ The LISP Challenge § LISP Machine                                        ─╬─│┼
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
-#define ATOM 1
-#define CONS 0
+#define kT          4
+#define kQuote      6
+#define kCond       12
+#define kAtom       17
+#define kCar        22
+#define kCdr        26
+#define kCons       30
+#define kEq         35
 
-#define ISATOM(x)   ((x)&1)
-#define VALUE(x)    ((x)>>1)
-#define OBJECT(t,v) ((v)<<1|(t))
+#define M (RAM + sizeof(RAM) / sizeof(RAM[0]) / 2)
+#define S "NIL\0T\0QUOTE\0COND\0ATOM\0CAR\0CDR\0CONS\0EQ"
 
-#define NIL         OBJECT(ATOM,0)
-#define ATOM_T      OBJECT(ATOM,4)
-#define ATOM_QUOTE  OBJECT(ATOM,6)
-#define ATOM_COND   OBJECT(ATOM,12)
-#define ATOM_ATOM   OBJECT(ATOM,17)
-#define ATOM_CAR    OBJECT(ATOM,22)
-#define ATOM_CDR    OBJECT(ATOM,26)
-#define ATOM_CONS   OBJECT(ATOM,30)
-#define ATOM_EQ     OBJECT(ATOM,35)
-#define ATOM_LAMBDA OBJECT(ATOM,38)
-#define UNDEFINED   OBJECT(ATOM,45)
+int cx; /* stores negative memory use */
+int dx; /* stores lookahead character */
+int RAM[0100000]; /* your own ibm7090 */
 
-const char kSymbols[] =
-    "NIL\0"
-    "T\0"
-    "QUOTE\0"
-    "COND\0"
-    "ATOM\0"
-    "CAR\0"
-    "CDR\0"
-    "CONS\0"
-    "EQ\0"
-    "LAMBDA\0"
-#if FUNDEF
-    "*UNDEFINED"
-#endif
-;
-
-int g_look;
-int g_index;
-char g_token[128];
-int g_mem[8192];
-char g_str[8192];
-
-int GetList(void);
-int GetObject(void);
-void PrintObject(int);
-int Eval(int, int);
-
-void SetupBuiltins(void) {
-  memmove(g_str, kSymbols, sizeof(kSymbols));
+Car(x) {
+  return M[x];
 }
 
-int Car(int x) {
-  return g_mem[VALUE(x) + 0];
+Cdr(x) {
+  return M[x + 1];
 }
 
-int Cdr(int x) {
-  return g_mem[VALUE(x) + 1];
+Cons(car, cdr) {
+  M[--cx] = cdr;
+  M[--cx] = car;
+  return cx;
 }
 
-int Cons(int car, int cdr) {
-  int i, cell;
-  i = g_index;
-  g_mem[i + 0] = car;
-  g_mem[i + 1] = cdr;
-  g_index = i + 2;
-  cell = OBJECT(CONS, i);
-  return cell;
+Gc(x, m, k) {
+  return x < m ? Cons(Gc(Car(x), m, k), 
+                      Gc(Cdr(x), m, k)) + k : x;
 }
 
-char *StpCpy(char *d, char *s) {
-  char c;
-  do {
-    c = *s++;
-    *d++ = c;
-  } while (c);
-  return d;
-}
-
-int Intern(char *s) {
-  int j, cx;
-  char c, *z, *t;
-  z = g_str;
-  c = *z++;
-  while (c) {
+Intern() {
+  int i, j, x;
+  for (i = 0; (x = M[i++]);) {
     for (j = 0;; ++j) {
-      if (c != s[j]) {
-        break;
-      }
-      if (!c) {
-        return OBJECT(ATOM, z - g_str - j - 1);
-      }
-      c = *z++;
+      if (x != RAM[j]) break;
+      if (!x) return i - j - 1;
+      x = M[i++];
     }
-    while (c) c = *z++;
-    c = *z++;
+    while (x)
+      x = M[i++];
   }
-  --z;
-  StpCpy(z, s);
-  return OBJECT(ATOM, z - g_str);
+  j = 0;
+  x = --i;
+  while ((M[i++] = RAM[j++]));
+  return x;
 }
 
-void PrintChar(unsigned char b) {
-  if (write(1, &b, 1) == -1) exit(1);
-}
-
-void PrintString(const char *s) {
-  char c;
-  for (;;) {
-    if (!(c = s[0])) break;
-    PrintChar(c);
-    ++s;
-  }
-}
-
-int GetChar(void) {
-  int b;
+GetChar() {
+  int c, t;
   static char *l, *p;
   if (l || (l = p = bestlineWithHistory("* ", "sectorlisp"))) {
     if (*p) {
-      b = *p++ & 255;
+      c = *p++ & 255;
     } else {
       free(l);
       l = p = 0;
-      b = '\n';
+      c = '\n';
     }
-    return b;
+    t = dx;
+    dx = c;
+    return t;
   } else {
-    PrintString("\n");
+    PrintChar('\n');
     exit(0);
   }
 }
 
-void GetToken(void) {
-  int al;
-  char *di;
-  di = g_token;
-  do {
-    if (g_look > ' ') {
-      *di++ = g_look;
-    }
-    al = g_look;
-    g_look = GetChar();
-  } while (al <= ' ' || (al > ')' && g_look > ')'));
-  *di++ = 0;
+PrintChar(b) {
+  fputwc(b, stdout);
 }
 
-int ConsumeObject(void) {
-  GetToken();
-  return GetObject();
+GetToken() {
+  int c, i = 0;
+  do if ((c = GetChar()) > ' ') RAM[i++] = c;
+  while (c <= ' ' || (c > ')' && dx > ')'));
+  RAM[i] = 0;
+  return c;
 }
 
-int List(int x, int y) {
-  return Cons(x, Cons(y, NIL));
-}
-
-int Quote(int x) {
-  return List(ATOM_QUOTE, x);
-}
-
-int GetQuote(void) {
-  return Quote(ConsumeObject());
-}
-
-int AddList(int x) {
+AddList(x) {
   return Cons(x, GetList());
 }
 
-int GetList(void) {
-  GetToken();
-#if QUOTES
-  if (*g_token == '\'') return AddList(GetQuote());
-#endif
-  if (*g_token == ')') return NIL;
-  return AddList(GetObject());
+GetList() {
+  int c = GetToken();
+  if (c == ')') return 0;
+  return AddList(GetObject(c));
 }
 
-int GetObject(void) {
-#if QUOTES
-  if (*g_token == '\'') return GetQuote();
-#endif
-  if (*g_token == '(') return GetList();
-  return Intern(g_token);
+GetObject(c) {
+  if (c == '(') return GetList();
+  return Intern();
 }
 
-int ReadObject(void) {
-  g_look = GetChar();
-  GetToken();
-  return GetObject();
+ReadObject() {
+  return GetObject(GetToken());
 }
 
-int Read(void) {
+Read() {
   return ReadObject();
 }
 
-void PrintAtom(int x) {
-  PrintString(g_str + VALUE(x));
+PrintAtom(x) {
+  int c;
+  for (;;) {
+    if (!(c = M[x++])) break;
+    PrintChar(c);
+  }
 }
 
-void PrintList(int x) {
-#if QUOTES
-  if (Car(x) == ATOM_QUOTE) {
-    PrintChar('\'');
-    PrintObject(Car(Cdr(x)));
-    return;
-  }
-#endif
+PrintList(x) {
   PrintChar('(');
   PrintObject(Car(x));
-  while ((x = Cdr(x)) != NIL) {
-    if (!ISATOM(x)) {
+  while ((x = Cdr(x)) != 0) {
+    if (x < 0) {
       PrintChar(' ');
       PrintObject(Car(x));
     } else {
-      PrintString("∙");
+      PrintChar(L'∙');
       PrintObject(x);
       break;
     }
@@ -253,130 +162,92 @@ void PrintList(int x) {
   PrintChar(')');
 }
 
-void PrintObject(int x) {
-  if (ISATOM(x)) {
-    PrintAtom(x);
-  } else {
+PrintObject(x) {
+  if (x < 0) {
     PrintList(x);
+  } else {
+    PrintAtom(x);
   }
 }
 
-void Print(int i) {
-  PrintObject(i);
-  PrintString("\n");
+Print(e) {
+  PrintObject(e);
+  PrintChar('\n');
 }
 
 /*───────────────────────────────────────────────────────────────────────────│─╗
 │ The LISP Challenge § Bootstrap John McCarthy's Metacircular Evaluator    ─╬─│┼
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
-int Assoc(int x, int y) {
-  if (y == NIL) return NIL;
-  if (x == Car(Car(y))) return Cdr(Car(y));
-  return Assoc(x, Cdr(y));
+Pairlis(x, y, a) {
+  if (!x) return a;
+  return Cons(Cons(Car(x), Car(y)),
+              Pairlis(Cdr(x), Cdr(y), a));
 }
 
-int Evcon(int c, int a) {
-  if (Eval(Car(Car(c)), a) != NIL) {
+Evlis(m, a) {
+  if (!m) return 0;
+  return Cons(Eval(Car(m), a),
+              Evlis(Cdr(m), a));
+}
+
+Apply(f, x, a) {
+  if (f < 0)      return Eval(Car(Cdr(Cdr(f))), Pairlis(Car(Cdr(f)), x, a));
+  if (f > kEq)    return Apply(Eval(f, a), x, a);
+  if (f == kEq)   return Car(x) == Car(Cdr(x)) ? kT : 0;
+  if (f == kCons) return Cons(Car(x), Car(Cdr(x)));
+  if (f == kAtom) return Car(x) < 0 ? 0 : kT;
+  if (f == kCar)  return Car(Car(x));
+  if (f == kCdr)  return Cdr(Car(x));
+}
+
+Evaluate(e, a) {
+  if (e < 0) {
+    if (Car(e) == kQuote) return Car(Cdr(e));
+    if (Car(e) == kCond)  return Evcon(Cdr(e), a);
+    return Apply(Car(e), Evlis(Cdr(e), a), a);
+  }
+  return Assoc(e, a);
+}
+
+Evcon(c, a) {
+  if (Eval(Car(Car(c)), a)) {
     return Eval(Car(Cdr(Car(c))), a);
   } else {
     return Evcon(Cdr(c), a);
   }
 }
 
-int Pairlis(int x, int y, int a) {
-  int di, si; /* it's zip() basically */
-  if (x == NIL) return a;
-  di = Cons(Car(x), Car(y));
-  si = Pairlis(Cdr(x), Cdr(y), a);
-  return Cons(di, si); /* Tail-Modulo-Cons */
+Assoc(x, y) {
+  if (!y) return 0;
+  if (x == Car(Car(y))) return Cdr(Car(y));
+  return Assoc(x, Cdr(y));
 }
 
-int Evlis(int m, int a) {
-  int di, si;
-  if (m == NIL) return NIL;
-  di = Eval(Car(m), a);
-  si = Evlis(Cdr(m), a);
-  return Cons(di, si);
-}
-
-int Apply(int fn, int x, int a) {
-  int t1, si, ax;
-  if (ISATOM(fn)) {
-    switch (fn) {
-#if FUNDEF
-    case NIL:
-      return UNDEFINED;
-#endif
-    case ATOM_CAR:
-      return Car(Car(x));
-    case ATOM_CDR:
-      return Cdr(Car(x));
-    case ATOM_ATOM:
-      return ISATOM(Car(x)) ? ATOM_T : NIL;
-    case ATOM_CONS:
-      return Cons(Car(x), Car(Cdr(x)));
-    case ATOM_EQ:
-      return Car(x) == Car(Cdr(x)) ? ATOM_T : NIL;
-    default:
-      return Apply(Eval(fn, a), x, a);
-    }
-  }
-  if (Car(fn) == ATOM_LAMBDA) {
-    t1 = Cdr(fn);
-    si = Pairlis(Car(t1), x, a);
-    ax = Car(Cdr(t1));
-    return Eval(ax, si);
-  }
-  return UNDEFINED;
-}
-
-int Evaluate(int e, int a) {
-  int ax;
-  if (ISATOM(e))
-    return Assoc(e, a);
-  ax = Car(e);
-  if (ISATOM(ax)) {
-    if (ax == ATOM_QUOTE)
-      return Car(Cdr(e));
-    if (ax == ATOM_COND)
-      return Evcon(Cdr(e), a);
-  }
-  return Apply(ax, Evlis(Cdr(e), a), a);
-}
-
-int Eval(int e, int a) {
-  int ax;
-#if TRACE
-  PrintString("> ");
-  PrintObject(e);
-  PrintString("\r\n  ");
-  PrintObject(a);
-  PrintString("\r\n");
-#endif
-  ax = Evaluate(e, a);
-#if TRACE
-  PrintString("< ");
-  PrintObject(ax);
-  PrintString("\r\n");
-#endif
-  return ax;
+Eval(e, a) {
+  int A, B, C;
+  A = cx;
+  e = Evaluate(e, a);
+  B = cx;
+  e = Gc(e, A, A - B);
+  C = cx;
+  while (C < B)
+    M[--A] = M[--B];
+  cx = A;
+  return e;
 }
 
 /*───────────────────────────────────────────────────────────────────────────│─╗
 │ The LISP Challenge § User Interface                                      ─╬─│┼
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
-void Repl(void) {
-  for (;;) {
-    Print(Eval(Read(), NIL));
-  }
-}
-
-int main(int argc, char *argv[]) {
-  SetupBuiltins();
+main() {
+  int i;
+  setlocale(LC_ALL, "");
   bestlineSetXlatCallback(bestlineUppercase);
-  PrintString("THE LISP CHALLENGE V1\r\n"
-              "VISIT GITHUB.COM/JART\r\n");
-  Repl();
+  for(i = 0; i < sizeof(S); ++i) M[i] = S[i];
+  for (;;) {
+    cx = 0;
+    Print(Eval(Read(), 0));
+  }
 }

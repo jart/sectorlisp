@@ -1,3 +1,6 @@
+CFLAGS  = -w -Os
+LDFLAGS = -s
+
 CLEANFILES =				\
 	lisp				\
 	lisp.o				\
