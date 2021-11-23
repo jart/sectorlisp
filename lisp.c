@@ -47,25 +47,6 @@ int cx; /* stores negative memory use */
 int dx; /* stores lookahead character */
 int RAM[0100000]; /* your own ibm7090 */
 
-Car(x) {
-  return M[x];
-}
-
-Cdr(x) {
-  return M[x + 1];
-}
-
-Cons(car, cdr) {
-  M[--cx] = cdr;
-  M[--cx] = car;
-  return cx;
-}
-
-Gc(x, m, k) {
-  return x < m ? Cons(Gc(Car(x), m, k), 
-                      Gc(Cdr(x), m, k)) + k : x;
-}
-
 Intern() {
   int i, j, x;
   for (i = 0; (x = M[i++]);) {
@@ -149,7 +130,7 @@ PrintAtom(x) {
 PrintList(x) {
   PrintChar('(');
   PrintObject(Car(x));
-  while ((x = Cdr(x)) != 0) {
+  while ((x = Cdr(x))) {
     if (x < 0) {
       PrintChar(' ');
       PrintObject(Car(x));
@@ -179,16 +160,47 @@ Print(e) {
 │ The LISP Challenge § Bootstrap John McCarthy's Metacircular Evaluator    ─╬─│┼
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
-Pairlis(x, y, a) {
-  if (!x) return a;
-  return Cons(Cons(Car(x), Car(y)),
-              Pairlis(Cdr(x), Cdr(y), a));
+Car(x) {
+  return M[x];
+}
+
+Cdr(x) {
+  return M[x + 1];
+}
+
+Cons(car, cdr) {
+  M[--cx] = cdr;
+  M[--cx] = car;
+  return cx;
+}
+
+Gc(x, m, k) {
+  return x < m ? Cons(Gc(Car(x), m, k), 
+                      Gc(Cdr(x), m, k)) + k : x;
 }
 
 Evlis(m, a) {
-  if (!m) return 0;
-  return Cons(Eval(Car(m), a),
-              Evlis(Cdr(m), a));
+  return m ? Cons(Eval(Car(m), a),
+                  Evlis(Cdr(m), a)) : 0;
+}
+
+Pairlis(x, y, a) {
+  return x ? Cons(Cons(Car(x), Car(y)),
+                  Pairlis(Cdr(x), Cdr(y), a)) : a;
+}
+
+Assoc(x, y) {
+  if (!y) return 0;
+  if (x == Car(Car(y))) return Cdr(Car(y));
+  return Assoc(x, Cdr(y));
+}
+
+Evcon(c, a) {
+  if (Eval(Car(Car(c)), a)) {
+    return Eval(Car(Cdr(Car(c))), a);
+  } else {
+    return Evcon(Cdr(c), a);
+  }
 }
 
 Apply(f, x, a) {
@@ -201,33 +213,18 @@ Apply(f, x, a) {
   if (f == kCdr)  return Cdr(Car(x));
 }
 
-Evaluate(e, a) {
-  if (e < 0) {
-    if (Car(e) == kQuote) return Car(Cdr(e));
-    if (Car(e) == kCond)  return Evcon(Cdr(e), a);
-    return Apply(Car(e), Evlis(Cdr(e), a), a);
-  }
-  return Assoc(e, a);
-}
-
-Evcon(c, a) {
-  if (Eval(Car(Car(c)), a)) {
-    return Eval(Car(Cdr(Car(c))), a);
-  } else {
-    return Evcon(Cdr(c), a);
-  }
-}
-
-Assoc(x, y) {
-  if (!y) return 0;
-  if (x == Car(Car(y))) return Cdr(Car(y));
-  return Assoc(x, Cdr(y));
-}
-
 Eval(e, a) {
   int A, B, C;
+  if (e >= 0)
+    return Assoc(e, a);
+  if (Car(e) == kQuote)
+    return Car(Cdr(e));
   A = cx;
-  e = Evaluate(e, a);
+  if (Car(e) == kCond) {
+    e = Evcon(Cdr(e), a);
+  } else {
+    e = Apply(Car(e), Evlis(Cdr(e), a), a);
+  }
   B = cx;
   e = Gc(e, A, A - B);
   C = cx;
