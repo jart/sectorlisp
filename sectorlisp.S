@@ -42,11 +42,11 @@ begin:	xor	%bx,%bx				# we use the tiny memory model
 	push	%cs				# that's the bios load address
 	pop	%es				# therefore NULL points to NUL
 	push	%cs				# terminated NIL string above!
-	cli					# disables hardware interrupts
+	#cli					# disables hardware interrupts
 	pop	%ss				# disable nonmaskable ones too
 	mov	%bx,%sp				# use highest address as stack
-	sti					# reenable hardware interrupts
-	cld					# normalize the direction flag
+	#sti					# reenable hardware interrupts
+	#cld					# normalize the direction flag
 	inc	%bx
 	inc	%bx
 main:	mov	$0x8000,%cx			# dl (g_look) is zero or cr
