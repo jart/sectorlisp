@@ -36,23 +36,17 @@ kCdr:	.asciz	"CDR"				# ordering matters
 kCons:	.asciz	"CONS"				# ordering matters
 kEq:	.asciz	"EQ"				# needs to be last
 
-begin:	xor	%bx,%bx				# we use the tiny memory model
-	push	%cs				# that means ss = ds = es = cs
+begin:	push	%cs				# that means ss = ds = es = cs
 	pop	%ds				# noting ljmp set cs to 0x7c00
 	push	%cs				# that's the bios load address
 	pop	%es				# therefore NULL points to NUL
 	push	%cs				# terminated NIL string above!
-	#cli					# disables hardware interrupts
-	pop	%ss				# disable nonmaskable ones too
-	mov	%bx,%sp				# use highest address as stack
-	#sti					# reenable hardware interrupts
-	#cld					# normalize the direction flag
-	inc	%bx
-	inc	%bx
+	pop	%ss				# errata exists but don't care
+	xor	%sp,%sp				# use highest address as stack
+	mov	$2,%bx
 main:	mov	$0x8000,%cx			# dl (g_look) is zero or cr
 	call	GetToken
 	call	GetObject
-	xor	%dx,%dx
 	call	Eval
 	xchg	%ax,%si
 	call	PrintObject
@@ -66,7 +60,7 @@ GetToken:					# GetToken():al, dl is g_look
 	cmp	$' ',%al
 	jbe	2f
 	stosb
-	xchg	%ax,%si
+	xchg	%ax,%bp
 2:	call	GetChar				# exchanges dx and ax
 	cmp	$' ',%al
 	jbe	1b
@@ -75,7 +69,7 @@ GetToken:					# GetToken():al, dl is g_look
 	cmp	$')',%dl			# dl = g_look
 	ja	1b
 3:	movb	%bh,(%di)			# bh is zero
-	xchg	%si,%ax
+	xchg	%bp,%ax
 	ret
 
 .PutObject:					# .PutObject(c:al,x:si)
@@ -109,7 +103,8 @@ GetObject:					# called just after GetToken
 	cmpb	$'(',%al
 	je	GetList
 .Intern:
-	xor	%di,%di				# di = g_str
+	mov	%cx,%si
+	xor	%di,%di
 	xor	%al,%al
 0:	push	%di				# save 1
 1:	cmpsb
@@ -118,7 +113,7 @@ GetObject:					# called just after GetToken
 	scasb
 	jne	1b
 	jmp	5f
-2:	pop	%si				# drop 1
+2:	pop	%bp				# drop 1
 	mov	%cx,%si
 3:	scasb
 	jne	3b
@@ -169,17 +164,14 @@ Evlis:	test	%di,%di				# Evlis(m:di,a:dx):ax
 #	jmp	xCons
 
 xCons:	pop	%di				# restore 2
-Cons:	xchg	%ax,%si				# Cons(m:di,a:ax):ax
-	xchg	%di,%ax
-	mov	%cx,%di
-	stosw
-	xchg	%si,%ax
-	stosw
-	xchg	%di,%cx
+Cons:	xchg	%di,%cx				# Cons(m:di,a:ax):ax
+	mov	%cx,(%di)
+	mov	%ax,(%bx,%di)
+	lea	4(%di),%cx
 1:	xchg	%di,%ax
 	ret
 
-Gc:	cmp	%dx,%di				# Gc(x:di,mark:dx,aj:bp):ax
+Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
 	jb	1b				# we assume immutable cells
 	push	(%bx,%di)			# mark prevents negative gc
 	mov	(%di),%di
@@ -189,7 +181,8 @@ Gc:	cmp	%dx,%di				# Gc(x:di,mark:dx,aj:bp):ax
 	call	Gc
 	pop	%di
 	call	Cons
-	sub	%bp,%ax				# subtract adjustment
+	sub	%si,%ax				# ax -= C - B
+	add	%dx,%ax
 	ret
 
 GetList:call	GetToken
@@ -200,24 +193,21 @@ GetList:call	GetToken
 	call	GetList
 	jmp	xCons
 
-Evaluate:					# Evaluate(e:ax,a:dx):ax
-	test	%ax,%ax				# Implementation of Eval
-	jns	Assoc				# lookup val if atom
-	xchg	%ax,%si				# di = e
-	lodsw					# ax = Car(e)
-	cmp	$kQuote,%ax			# maybe CONS
-	mov	(%si),%di			# di = Cdr(e)
-	je	Car
-	cmp	$kCond,%ax
-	je	Evcon
-.Ldflt2:push	%ax				# save 2
-	call	Evlis				# preserves dx
-	xchg	%ax,%si
-	pop	%ax				# restore 2
+.dflt1:	push	%si				# save x
+	call	Eval
+	pop	%si				# restore x
 #	jmp	Apply
 
 Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
-	js	.lamb				# jump if atom
+	jns	.switch				# jump if atom
+	xchg	%ax,%di				# di = fn
+.lambda:mov	(%bx,%di),%di			# di = Cdr(fn)
+	push	%di				# save 1
+	mov	(%di),%di			# di = Cadr(fn)
+	call	Pairlis
+	xchg	%ax,%dx
+	pop	%di				# restore 1
+	jmp	.EvCadr
 .switch:cmp	$kEq,%ax			# eq is last builtin atom
 	ja	.dflt1				# ah is zero if not above
 	mov	(%si),%di			# di = Car(x)
@@ -231,14 +221,6 @@ Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
 	jns	.retT
 .retF:	xor	%ax,%ax				# ax = nil
 	ret
-.lamb:	xchg	%ax,%di				# di = fn
-.lambda:mov	(%bx,%di),%di			# di = Cdr(fn)
-	push	%di				# save 1
-	mov	(%di),%di			# di = Cadr(fn)
-	call	Pairlis
-	xchg	%ax,%dx
-	pop	%di				# restore 1
-	jmp	.EvCadr
 .ifCons:cmp	$kCons,%al
 	mov	(%bx,%si),%si			# si = Cdr(x)
 	lodsw					# si = Cadr(x)
@@ -247,24 +229,18 @@ Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
 	jne	.retF
 .retT:	mov	$kT,%ax
 	ret
-.dflt1:	push	%si				# save x
-	call	Eval
-	pop	%si				# restore x
-	jmp	Apply
 
 Cadr:	mov	(%bx,%di),%di			# contents of decrement register
 	.byte	0x3C				# cmp §scasw,%al (nop next byte)
 Cdr:	scasw					# increments our data index by 2
 Car:	mov	(%di),%ax			# contents of address register!!
-	ret
+2:	ret
 
-Assoc:	mov	%dx,%di				# Assoc(x:ax,y:dx):ax
-	test	%dx,%dx				# nil test
-	jz	.retF				# return nil if end of list
-	mov	(%bx,%di),%dx			# we assume Eval() saved dx
-	mov	(%di),%di
+Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
+1:	mov	(%si),%di
+	mov	(%bx,%si),%si
 	scasw
-	jne	Assoc
+	jne	1b
 	jmp	Car
 
 1:	mov	(%bx,%di),%di			# di = Cdr(c)
@@ -279,22 +255,33 @@ Evcon:	push	%di				# save c
 .EvCadr:call	Cadr				# ax = Cadar(c)
 #	jmp	Eval
 
-Eval:	push	%dx				# Eval(e:ax,a:dx):ax w/ gc
-	push	%cx				# w/ ABC garbage collector
-	call	Evaluate			# discards non-result cons
-	pop	%dx
-	push	%cx
-	mov	%cx,%bp
-	sub	%dx,%bp
+Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
+	jz	1f
+	jns	Assoc				# lookup val if atom
+	xchg	%ax,%si				# di = e
+	lodsw					# ax = Car(e)
+	cmp	$kQuote,%ax			# maybe CONS
+	mov	(%si),%di			# di = Cdr(e)
+	je	Car
+	cmp	$kCond,%ax
+	je	Evcon				# ABC Garbage Collector
+	push	%dx				# save a
+	push	%cx				# save A
+	push	%ax
+	call	Evlis
+	xchg	%ax,%si
+	pop	%ax
+	call	Apply
+	pop	%dx				# restore A
+	mov	%cx,%si				# si = B
 	xchg	%ax,%di
 	call	Gc
-	pop	%si
-	mov	%dx,%di
-	sub	%si,%cx
+	mov	%dx,%di				# di = A
+	sub	%si,%cx				# cx = C - B
 	rep movsb
-	mov	%di,%cx
-	pop	%dx
-	ret
+	mov	%di,%cx				# cx = A + (C - B)
+	pop	%dx				# restore a
+1:	ret
 
 .sig:	.fill	510 - (. - _start), 1, 0xce
 	.word	0xAA55
