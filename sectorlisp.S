@@ -111,8 +111,7 @@ GetObject:					# called just after GetToken
 	dec	%di
 	scasb
 	jne	1b
-	pop	%ax				# restore 1
-	ret
+	jmp	5f
 2:	pop	%bp				# drop 1
 	mov	%cx,%si
 3:	scasb
@@ -124,8 +123,8 @@ GetObject:					# called just after GetToken
 	dec	%di
 	scasb
 	jnz	4b
-	pop	%ax				# restore 1
-	ret
+5:	pop	%ax				# restore 1
+.ret:	ret
 
 GetChar:xor	%ax,%ax				# GetChar→al:dl
 	int	$0x16				# get keystroke
@@ -141,7 +140,8 @@ PutChar:mov	$0x0e,%ah			# prints CP-437
 Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):ax
 	jz	1f				# jump if nil
 	push	(%bx,%di)			# save 1 Cdr(x)
-	push	(%bx,%si)			# save 2 Cdr(y)
+	lodsw
+	push	(%si)				# save 2 Cdr(y)
 	mov	(%di),%di
 	call	Cons				# preserves dx
 	pop	%si				# restore 2
