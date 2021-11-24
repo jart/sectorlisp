@@ -114,14 +114,14 @@ Intern:	push	%cx				# Intern(cx,di): ax
 	mov	%bp,%cx
 	mov	%di,%ax
 	cmp	%bh,(%di)
-	je	2f
+	je	8f
 	rep cmpsb				# memcmp(di,si,cx)
 	je	9f
-	not	%cx
 	xor	%ax,%ax
-	repne scasb				# memchr(di,al,cx)
+2:	scasb					# memchr(di,al,cx)
+	jne	2b
 	jmp	1b
-2:	rep movsb				# memcpy(di,si,cx)
+8:	rep movsb				# memcpy(di,si,cx)
 9:	pop	%cx
 	ret
 
