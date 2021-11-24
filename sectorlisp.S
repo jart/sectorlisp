@@ -60,7 +60,7 @@ GetToken:					# GetToken():al, dl is g_look
 	cmp	$' ',%al
 	jbe	2f
 	stosb
-	xchg	%ax,%bp
+	xchg	%ax,%si
 2:	call	GetChar				# exchanges dx and ax
 	cmp	$' ',%al
 	jbe	1b
@@ -69,7 +69,7 @@ GetToken:					# GetToken():al, dl is g_look
 	cmp	$')',%dl			# dl = g_look
 	ja	1b
 3:	movb	%bh,(%di)			# bh is zero
-	xchg	%bp,%ax
+	xchg	%si,%ax
 	ret
 
 .PrintList:
