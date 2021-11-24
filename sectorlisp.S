@@ -72,11 +72,6 @@ GetToken:					# GetToken():al, dl is g_look
 	xchg	%bp,%ax
 	ret
 
-.PutObject:					# .PutObject(c:al,x:si)
-	call	PutChar				# preserves si
-PrintObject:					# PrintObject(x:si)
-	test	%si,%si				# set sf=1 if cons
-	jns	.PrintAtom			# jump if cons
 .PrintList:
 	mov	$'(',%al
 2:	push	(%bx,%si)
@@ -91,8 +86,12 @@ PrintObject:					# PrintObject(x:si)
 	call	.PutObject
 4:	mov	$')',%al
 	jmp	PutChar
+.PutObject:					# .PutObject(c:al,x:si)
 .PrintString:					# nul-terminated in si
-	call	PutChar
+	call	PutChar				# preserves si
+PrintObject:					# PrintObject(x:si)
+	test	%si,%si				# set sf=1 if cons
+	js	.PrintList			# jump if not cons
 .PrintAtom:
 	lodsb
 	test	%al,%al				# test for nul terminator
