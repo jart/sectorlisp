@@ -23,6 +23,8 @@
 // Compatible with the original hardware
 
 	.code16
+	.set	save,-10
+	.set	look,start+2
 	.globl	_start
 _start:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
 kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
@@ -36,37 +38,53 @@ kCdr:	.asciz	"CDR"				# ordering matters
 kCons:	.asciz	"CONS"				# ordering matters
 kEq:	.asciz	"EQ"				# needs to be last
 
-begin:	push	%cs				# that means ss = ds = es = cs
+begin:	mov	$2,%bx
+	mov	$0x8000,%cx
+main:	cli
+	push	%cs				# that means ss = ds = es = cs
 	pop	%ds				# noting ljmp set cs to 0x7c00
 	push	%cs				# that's the bios load address
 	pop	%es				# therefore NULL points to NUL
 	push	%cs				# terminated NIL string above!
 	pop	%ss				# errata exists but don't care
 	xor	%sp,%sp				# use highest address as stack
-	mov	$2,%bx
-main:	mov	$0x8000,%cx			# dl (g_look) is zero or cr
+	sti
 	call	GetToken
 	call	GetObject
+	mov	%dx,save
 	call	Eval
-	xchg	%ax,%si
+	test	%ax,%ax
+	jns	Print
+	push	%ax
+	xchg	%ax,%di
+	xchg	%dx,%ax
+	call	Cons
+	xchg	%ax,%dx
+	pop	%ax
+Print:	xchg	%ax,%si
 	call	PrintObject
 	mov	$'\r',%al
 	call	PutChar
 	jmp	main
 
-GetToken:					# GetToken():al, dl is g_look
+GetToken:					# GetToken():al
 	mov	%cx,%di
-1:	mov	%dl,%al
+1:	mov	look,%al
 	cmp	$' ',%al
 	jbe	2f
 	stosb
 	xchg	%ax,%si
 2:	call	GetChar				# exchanges dx and ax
+	cmp	$'\b',%al
+	jne	4f
+	dec	%di
+	jmp	2b
+4:	xchg	%ax,look
 	cmp	$' ',%al
 	jbe	1b
 	cmp	$')',%al
 	jbe	3f
-	cmp	$')',%dl			# dl = g_look
+	cmpb	$')',look
 	ja	1b
 3:	mov	%bh,(%di)			# bh is zero
 	xchg	%si,%ax
@@ -123,14 +141,21 @@ Intern:	push	%cx				# Intern(cx,di): ax
 	jmp	1b
 2:	rep movsb				# memcpy(di,si,cx)
 9:	pop	%cx
-	ret
+3:	ret
+
+Undef:	push	%ax
+	mov	$'?',%al
+	call	PutChar
+	pop	%ax
+	mov	save,%dx
+	jmp	Print
 
 GetChar:xor	%ax,%ax				# GetChar→al:dl
 	int	$0x16				# get keystroke
 PutChar:mov	$0x0e,%ah			# prints CP-437
 	int	$0x10				# vidya service
 	cmp	$'\r',%al			# don't clobber
-	jne	1f				# look xchg ret
+	jne	3b				# look xchg ret
 	mov	$'\n',%al
 	jmp	PutChar
 
@@ -183,6 +208,15 @@ Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
 	add	%dx,%ax
 	ret
 
+Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
+1:	test	%si,%si
+	jns	Undef
+	mov	(%si),%di
+	mov	(%bx,%si),%si
+	scasw
+	jne	1b
+	jmp	Car
+
 GetList:call	GetToken
 	cmp	$')',%al
 	je	.retF
@@ -233,13 +267,6 @@ Cadr:	mov	(%bx,%di),%di			# contents of decrement register
 Cdr:	scasw					# increments our data index by 2
 Car:	mov	(%di),%ax			# contents of address register!!
 2:	ret
-
-Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
-1:	mov	(%si),%di
-	mov	(%bx,%si),%si
-	scasw
-	jne	1b
-	jmp	Car
 
 1:	mov	(%bx,%di),%di			# di = Cdr(c)
 Evcon:	push	%di				# save c

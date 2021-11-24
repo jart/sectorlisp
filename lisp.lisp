@@ -120,3 +120,15 @@ NIL
                    ((EQ (CAR E) (QUOTE COND)) (EVCON (CDR E) A))
                    ((QUOTE T) (APPLY (CAR E) (EVLIS (CDR E) A) A))))
             ((QUOTE T) (APPLY (CAR E) (EVLIS (CDR E) A) A))))))
+
+(CONS (QUOTE NOT)
+      (QUOTE (LAMBDA (X)
+               (COND (X (QUOTE F))
+                     ((QUOTE T) (QUOTE T))))))
+
+((LAMBDA (X E C)
+   (CONS (QUOTE LAMBDA) (CONS NIL (CONS (CAR (CDR C)) NIL))))
+ (QUOTE T)
+ (QUOTE (LAMBDA (F) (F)))
+ (QUOTE (COND (X (QUOTE F))
+              ((QUOTE T) (QUOTE T)))))

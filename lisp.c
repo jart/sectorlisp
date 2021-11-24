@@ -25,6 +25,7 @@
 #include <string.h>
 #include <locale.h>
 #include <limits.h>
+#include <setjmp.h>
 #endif
 
 /*───────────────────────────────────────────────────────────────────────────│─╗
@@ -46,6 +47,7 @@
 int cx; /* stores negative memory use */
 int dx; /* stores lookahead character */
 int RAM[0100000]; /* your own ibm7090 */
+jmp_buf undefined;
 
 Intern() {
   int i, j, x;
@@ -157,10 +159,12 @@ Print(e) {
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
 Car(x) {
+  if (x >= 0) longjmp(undefined, x);
   return M[x];
 }
 
 Cdr(x) {
+  if (x >= 0) longjmp(undefined, x);
   return M[x + 1];
 }
 
@@ -186,7 +190,7 @@ Pairlis(x, y, a) {
 }
 
 Assoc(x, y) {
-  if (!y) return 0;
+  if (y >= 0) longjmp(undefined, x);
   if (x == Car(Car(y))) return Cdr(Car(y));
   return Assoc(x, Cdr(y));
 }
@@ -207,14 +211,14 @@ Apply(f, x, a) {
   if (f == kAtom) return Car(x) < 0 ? 0 : kT;
   if (f == kCar)  return Car(Car(x));
   if (f == kCdr)  return Cdr(Car(x));
+  longjmp(undefined, f);
 }
 
 Eval(e, a) {
   int A, B, C;
-  if (e >= 0)
-    return Assoc(e, a);
-  if (Car(e) == kQuote)
-    return Car(Cdr(e));
+  if (!e) return 0;
+  if (e > 0) return Assoc(e, a);
+  if (Car(e) == kQuote) return Car(Cdr(e));
   A = cx;
   if (Car(e) == kCond) {
     e = Evcon(Cdr(e), a);
@@ -235,12 +239,20 @@ Eval(e, a) {
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
 main() {
-  int i;
+  int x, a = 0;
   setlocale(LC_ALL, "");
   bestlineSetXlatCallback(bestlineUppercase);
-  for(i = 0; i < sizeof(S); ++i) M[i] = S[i];
+  for(x = 0; x < sizeof(S); ++x) M[x] = S[x];
   for (;;) {
-    cx = 0;
-    Print(Eval(Read(), 0));
+    if (!(x = setjmp(undefined))) {
+      x = Eval(Read(), a);
+      if (x < 0) {
+        a = Cons(x, a);
+      }
+    } else {
+      if (x == 1) x = 0;
+      PrintChar('?');
+    }
+    Print(x);
   }
 }
