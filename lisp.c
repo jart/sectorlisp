@@ -111,12 +111,8 @@ GetObject(c) {
   return Intern();
 }
 
-ReadObject() {
-  return GetObject(GetToken());
-}
-
 Read() {
-  return ReadObject();
+  return GetObject(GetToken());
 }
 
 PrintAtom(x) {
