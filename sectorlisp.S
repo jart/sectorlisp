@@ -229,23 +229,23 @@ Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
 	mov	(%bx,%si),%si			# si = Cdr(x)
 	lodsw					# si = Cadr(x)
 	je	Cons
-.isEq:	cmp	%di,%ax				# we know for certain it's eq
+.isEq:	xor	%di,%ax				# we know for certain it's eq
 	jne	.retF
-.retT:	mov	$kT,%ax
+.retT:	mov	$kT,%al
 	ret
-
-Cadr:	mov	(%bx,%di),%di			# contents of decrement register
-	.byte	0x3C				# cmp §scasw,%al (nop next byte)
-Cdr:	scasw					# increments our data index by 2
-Car:	mov	(%di),%ax			# contents of address register!!
-2:	ret
 
 Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
 1:	mov	(%si),%di
 	mov	(%bx,%si),%si
 	scasw
 	jne	1b
-	jmp	Car
+	.byte	0xF6				# test §mov/cmp (nop next bytes)
+Cadr:	mov	(%bx,%di),%di			# contents of decrement register
+	.byte	0x3C				# cmp §scasw,%al (nop next byte)
+Cdr:	scasw					# increments our data index by 2
+Car:	mov	(%di),%ax			# contents of address register!!
+2:	ret
+
 
 1:	mov	(%bx,%di),%di			# di = Cdr(c)
 Evcon:	push	%di				# save c
