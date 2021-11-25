@@ -239,13 +239,12 @@ Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
 	mov	(%bx,%si),%si
 	scasw
 	jne	1b
-	.byte	0xF6				# test §mov/cmp (nop next bytes)
+	.byte	0xF6				# testb §i8,i16(%bp,%di) jmp Car
 Cadr:	mov	(%bx,%di),%di			# contents of decrement register
 	.byte	0x3C				# cmp §scasw,%al (nop next byte)
 Cdr:	scasw					# increments our data index by 2
 Car:	mov	(%di),%ax			# contents of address register!!
 2:	ret
-
 
 1:	mov	(%bx,%di),%di			# di = Cdr(c)
 Evcon:	push	%di				# save c
@@ -287,9 +286,10 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 	pop	%dx				# restore a
 1:	ret
 
-.sig:	.fill	510 - (. - _start), 1, 0xce
+.sig:	.fill	512 - (2f - 1f) - (. - _start), 1, 0xce
+1:	.ascii	" SECTORLISP v2 "
 	.word	0xAA55
-	.type	.sig,@object
+2:	.type	.sig,@object
 	.type	kQuote,@object
 	.type	kCond,@object
 	.type	kAtom,@object
