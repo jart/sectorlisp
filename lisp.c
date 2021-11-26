@@ -33,15 +33,14 @@
 
 #define kT          4
 #define kQuote      6
-#define kCond       12
-#define kAtom       17
-#define kCar        22
-#define kCdr        26
-#define kCons       30
-#define kEq         35
+#define kAtom       12
+#define kCar        17
+#define kCdr        21
+#define kCons       25
+#define kEq         30
 
 #define M (RAM + sizeof(RAM) / sizeof(RAM[0]) / 2)
-#define S "NIL\0T\0QUOTE\0COND\0ATOM\0CAR\0CDR\0CONS\0EQ"
+#define S "NIL\0T\0QUOTE\0ATOM\0CAR\0CDR\0CONS\0EQ"
 
 int cx; /* stores negative memory use */
 int dx; /* stores lookahead character */
@@ -125,22 +124,24 @@ PrintAtom(x) {
 
 PrintList(x) {
   PrintChar('(');
-  PrintObject(Car(x));
-  while ((x = Cdr(x))) {
-    if (x < 0) {
-      PrintChar(' ');
-      PrintObject(Car(x));
-    } else {
-      PrintChar(L'∙');
-      PrintObject(x);
-      break;
+  if (x) {
+    PrintObject(Car(x));
+    while ((x = Cdr(x))) {
+      if (x < 0) {
+        PrintChar(' ');
+        PrintObject(Car(x));
+      } else {
+        PrintChar(L'∙');
+        PrintObject(x);
+        break;
+      }
     }
   }
   PrintChar(')');
 }
 
 PrintObject(x) {
-  if (x < 0) {
+  if (1./x < 0) {
     PrintList(x);
   } else {
     PrintAtom(x);
@@ -186,7 +187,6 @@ Pairlis(x, y, a) {
 }
 
 Assoc(x, y) {
-  if (!y) return 0;
   if (x == Car(Car(y))) return Cdr(Car(y));
   return Assoc(x, Cdr(y));
 }
@@ -200,7 +200,7 @@ Evcon(c, a) {
 }
 
 Apply(f, x, a) {
-  if (f < 0)      return Eval(Car(Cdr(Cdr(f))), Pairlis(Car(Cdr(f)), x, a));
+  if (f < 0)      return Evcon(Cdr(f), Pairlis(Car(f), x, a));
   if (f > kEq)    return Apply(Eval(f, a), x, a);
   if (f == kEq)   return Car(x) == Car(Cdr(x)) ? kT : 0;
   if (f == kCons) return Cons(Car(x), Car(Cdr(x)));
@@ -211,21 +211,13 @@ Apply(f, x, a) {
 
 Eval(e, a) {
   int A, B, C;
-  if (e >= 0)
-    return Assoc(e, a);
-  if (Car(e) == kQuote)
-    return Car(Cdr(e));
-  A = cx;
-  if (Car(e) == kCond) {
-    e = Evcon(Cdr(e), a);
-  } else {
-    e = Apply(Car(e), Evlis(Cdr(e), a), a);
-  }
-  B = cx;
-  e = Gc(e, A, A - B);
+  if (!e) return 0;
+  if (e > 0) return Assoc(e, a);
+  if (Car(e) == kQuote) return Car(Cdr(e));
+  A = cx, e = Apply(Car(e), Evlis(Cdr(e), a), a);
+  B = cx, e = Gc(e, A, A - B);
   C = cx;
-  while (C < B)
-    M[--A] = M[--B];
+  while (C < B) M[--A] = M[--B];
   cx = A;
   return e;
 }

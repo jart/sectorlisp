@@ -29,7 +29,6 @@ kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
 start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
 	.asciz	""
 kQuote:	.asciz	"QUOTE"
-kCond:	.asciz	"COND"
 kAtom:	.asciz	"ATOM"				# ordering matters
 kCar:	.asciz	"CAR"				# ordering matters
 kCdr:	.asciz	"CDR"				# ordering matters
@@ -205,13 +204,12 @@ GetList:call	GetToken
 Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
 	jns	.switch				# jump if atom
 	xchg	%ax,%di				# di = fn
-.lambda:mov	(%bx,%di),%di			# di = Cdr(fn)
-	push	%di				# save 1
+.lambda:push	(%bx,%di)			# save 1
 	mov	(%di),%di			# di = Cadr(fn)
 	call	Pairlis
 	xchg	%ax,%dx
 	pop	%di				# restore 1
-	jmp	.EvCadr
+	jmp	Evcon
 .switch:cmp	$kEq,%ax			# eq is last builtin atom
 	ja	.dflt1				# ah is zero if not above
 	mov	(%si),%di			# di = Car(x)
@@ -255,7 +253,7 @@ Evcon:	push	%di				# save c
 	test	%ax,%ax				# nil test
 	jz	1b
 	mov	(%di),%di			# di = Car(c)
-.EvCadr:call	Cadr				# ax = Cadar(c)
+	call	Cadr				# ax = Cadar(c)
 #	jmp	Eval
 
 Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
@@ -266,8 +264,6 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 	cmp	$kQuote,%ax			# maybe CONS
 	mov	(%si),%di			# di = Cdr(e)
 	je	Car
-	cmp	$kCond,%ax
-	je	Evcon				# ABC Garbage Collector
 	push	%dx				# save a
 	push	%cx				# save A
 	push	%ax
@@ -291,7 +287,6 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 	.word	0xAA55
 2:	.type	.sig,@object
 	.type	kQuote,@object
-	.type	kCond,@object
 	.type	kAtom,@object
 	.type	kCar,@object
 	.type	kCdr,@object
