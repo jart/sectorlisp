@@ -28,121 +28,78 @@
 #include <setjmp.h>
 #endif
 
-/*───────────────────────────────────────────────────────────────────────────│─╗
-│ The LISP Challenge § LISP Machine                                        ─╬─│┼
-╚────────────────────────────────────────────────────────────────────────────│*/
-
-#define kT          4
-#define kQuote      6
-#define kCond       12
-#define kAtom       17
-#define kCar        22
-#define kCdr        26
-#define kCons       30
-#define kEq         35
-
-#define M (RAM + sizeof(RAM) / sizeof(RAM[0]) / 2)
-#define S "NIL\0T\0QUOTE\0COND\0ATOM\0CAR\0CDR\0CONS\0EQ"
-
-int cx; /* stores negative memory use */
-int dx; /* stores lookahead character */
-int RAM[0100000]; /* your own ibm7090 */
 jmp_buf undefined;
+int cx, dx, M[0100000];
+int Null = sizeof(M) / sizeof(M[0]) / 2;
+char *line = "NIL T CAR CDR ATOM COND CONS QUOTE EQ ";
+int kT, kEq, kNil, kCar, kCdr, kCond, kAtom, kCons, kQuote;
 
-Intern() {
-  int i, j, x;
-  for (i = 0; (x = M[i++]);) {
-    for (j = 0;; ++j) {
-      if (x != RAM[j]) break;
-      if (!x) return i - j - 1;
-      x = M[i++];
-    }
-    while (x)
-      x = M[i++];
-  }
-  j = 0;
-  x = --i;
-  while ((M[i++] = RAM[j++]));
-  return x;
+Get(i) {
+  return M[Null + i];
 }
 
-GetChar() {
-  int c, t;
-  static char *l, *p;
-  if (l || (l = p = bestlineWithHistory("* ", "sectorlisp"))) {
-    if (*p) {
-      c = *p++ & 255;
-    } else {
-      free(l);
-      l = p = 0;
-      c = '\n';
-    }
-    t = dx;
-    dx = c;
-    return t;
-  } else {
-    PrintChar('\n');
-    exit(0);
-  }
-}
-
-PrintChar(b) {
-  fputwc(b, stdout);
-}
-
-GetToken() {
-  int c, i = 0;
-  do if ((c = GetChar()) > ' ') RAM[i++] = c;
-  while (c <= ' ' || (c > ')' && dx > ')'));
-  RAM[i] = 0;
-  return c;
-}
-
-AddList(x) {
-  return Cons(x, GetList());
-}
-
-GetList() {
-  int c = GetToken();
-  if (c == ')') return 0;
-  return AddList(GetObject(c));
-}
-
-GetObject(c) {
-  if (c == '(') return GetList();
-  return Intern();
+Set(i, x) {
+  M[Null + i] = x;
 }
 
 Read() {
-  return GetObject(GetToken());
+  return ReadObject(ReadAtom(0));
+}
+
+Intern(x, y, i) {
+  if (x == Get(i) && y == Get(i + 1)) return i;
+  if (Get(i)) return Intern(x, y, i + 2);
+  Set(i, x);
+  Set(i + 1, y);
+  return i;
+}
+
+ReadAtom(i) {
+  int c = ReadChar();
+  if (c <= ' ') return ReadAtom(i);
+  return Intern(c, c > ')' && dx > ')' ? ReadAtom(0) : 0, i + c * 2);
+}
+
+AddList(x) {
+  return Cons(x, ReadList());
+}
+
+ReadList() {
+  int t = ReadAtom(0);
+  if (Get(t) == ')') return kNil;
+  return AddList(ReadObject(t));
+}
+
+ReadObject(t) {
+  if (Get(t) != '(') return t;
+  return ReadList();
 }
 
 PrintAtom(x) {
-  int c;
-  for (;;) {
-    if (!(c = M[x++])) break;
-    PrintChar(c);
-  }
+  do PrintChar(Get(x));
+  while ((x = Get(x + 1)));
 }
 
 PrintList(x) {
   PrintChar('(');
-  PrintObject(Car(x));
-  while ((x = Cdr(x))) {
-    if (x < 0) {
-      PrintChar(' ');
-      PrintObject(Car(x));
-    } else {
-      PrintChar(L'∙');
-      PrintObject(x);
-      break;
+  if (x < 0) {
+    PrintObject(Car(x));
+    while ((x = Cdr(x)) != kNil) {
+      if (x < 0) {
+        PrintChar(' ');
+        PrintObject(Car(x));
+      } else {
+        PrintChar(L'∙');
+        PrintObject(x);
+        break;
+      }
     }
   }
   PrintChar(')');
 }
 
 PrintObject(x) {
-  if (x < 0) {
+  if (1./x < 0) {
     PrintList(x);
   } else {
     PrintAtom(x);
@@ -154,39 +111,49 @@ Print(e) {
   PrintChar('\n');
 }
 
-/*───────────────────────────────────────────────────────────────────────────│─╗
-│ The LISP Challenge § Bootstrap John McCarthy's Metacircular Evaluator    ─╬─│┼
-╚────────────────────────────────────────────────────────────────────────────│*/
-
 Car(x) {
-  if (x >= 0) longjmp(undefined, x);
-  return M[x];
+  if (x < 0) {
+    return Get(x);
+  } else {
+    longjmp(undefined, x);
+  }
 }
 
 Cdr(x) {
-  if (x >= 0) longjmp(undefined, x);
-  return M[x + 1];
+  if (x < 0) {
+    return Get(x + 1);
+  } else {
+    longjmp(undefined, x);
+  }
 }
 
 Cons(car, cdr) {
-  M[--cx] = cdr;
-  M[--cx] = car;
+  Set(--cx, cdr);
+  Set(--cx, car);
   return cx;
 }
 
-Gc(x, m, k) {
-  return x < m ? Cons(Gc(Car(x), m, k), 
-                      Gc(Cdr(x), m, k)) + k : x;
+Gc(A, x) {
+  int C, B = cx;
+  x = Copy(x, A, A - B), C = cx;
+  while (C < B) Set(--A, Get(--B));
+  cx = A;
+  return x;
+}
+
+Copy(x, m, k) {
+  return x < m ? Cons(Copy(Car(x), m, k), 
+                      Copy(Cdr(x), m, k)) + k : x;
 }
 
 Evlis(m, a) {
-  return m ? Cons(Eval(Car(m), a),
-                  Evlis(Cdr(m), a)) : 0;
+  return m != kNil ? Cons(Eval(Car(m), a),
+                          Evlis(Cdr(m), a)) : kNil;
 }
 
 Pairlis(x, y, a) {
-  return x ? Cons(Cons(Car(x), Car(y)),
-                  Pairlis(Cdr(x), Cdr(y), a)) : a;
+  return x != kNil ? Cons(Cons(Car(x), Car(y)),
+                          Pairlis(Cdr(x), Cdr(y), a)) : a;
 }
 
 Assoc(x, y) {
@@ -196,63 +163,93 @@ Assoc(x, y) {
 }
 
 Evcon(c, a) {
-  if (Eval(Car(Car(c)), a)) {
+  if (Eval(Car(Car(c)), a) != kNil) {
     return Eval(Car(Cdr(Car(c))), a);
-  } else {
+  } else if (Cdr(c) != kNil) {
     return Evcon(Cdr(c), a);
+  } else {
+    longjmp(undefined, c);
   }
 }
 
 Apply(f, x, a) {
   if (f < 0)      return Eval(Car(Cdr(Cdr(f))), Pairlis(Car(Cdr(f)), x, a));
-  if (f > kEq)    return Apply(Eval(f, a), x, a);
-  if (f == kEq)   return Car(x) == Car(Cdr(x)) ? kT : 0;
+  if (f == kEq)   return Car(x) == Car(Cdr(x)) ? kT : kNil;
   if (f == kCons) return Cons(Car(x), Car(Cdr(x)));
-  if (f == kAtom) return Car(x) < 0 ? 0 : kT;
+  if (f == kAtom) return Car(x) < 0 ? kNil : kT;
   if (f == kCar)  return Car(Car(x));
   if (f == kCdr)  return Cdr(Car(x));
-  longjmp(undefined, f);
+  return Apply(Assoc(f, a), x, a);
 }
 
 Eval(e, a) {
-  int A, B, C;
-  if (!e) return 0;
-  if (e > 0) return Assoc(e, a);
+  int A = cx;
+  if (e == kNil) return kNil;
+  if (e >= 0) return Assoc(e, a);
   if (Car(e) == kQuote) return Car(Cdr(e));
-  A = cx;
   if (Car(e) == kCond) {
     e = Evcon(Cdr(e), a);
   } else {
     e = Apply(Car(e), Evlis(Cdr(e), a), a);
   }
-  B = cx;
-  e = Gc(e, A, A - B);
-  C = cx;
-  while (C < B)
-    M[--A] = M[--B];
-  cx = A;
-  return e;
+  return Gc(A, e);
 }
 
-/*───────────────────────────────────────────────────────────────────────────│─╗
-│ The LISP Challenge § User Interface                                      ─╬─│┼
-╚────────────────────────────────────────────────────────────────────────────│*/
-
 main() {
-  int x, a = 0;
+  int x, a;
   setlocale(LC_ALL, "");
   bestlineSetXlatCallback(bestlineUppercase);
-  for(x = 0; x < sizeof(S); ++x) M[x] = S[x];
-  for (;;) {
+  kNil = ReadAtom(0);
+  kT = ReadAtom(0);
+  kCar = ReadAtom(0);
+  kCdr = ReadAtom(0);
+  kAtom = ReadAtom(0);
+  kCond = ReadAtom(0);
+  kCons = ReadAtom(0);
+  kQuote = ReadAtom(0);
+  kEq = ReadAtom(0);
+  for (a = kNil;;) {
     if (!(x = setjmp(undefined))) {
-      x = Eval(Read(), a);
+      x = Read();
+      x = Eval(x, a);
       if (x < 0) {
         a = Cons(x, a);
       }
     } else {
-      if (x == 1) x = 0;
       PrintChar('?');
     }
     Print(x);
+  }
+}
+
+PrintChar(b) {
+  fputwc(b, stdout);
+}
+
+ReadChar() {
+  int b, c, t;
+  static char *freeme;
+  if (line || (line = freeme = bestlineWithHistory("* ", "sectorlisp"))) {
+    if (*line) {
+      c = *line++ & 0377;
+      if (c >= 0300) {
+        for (b = 0200; c & b; b >>= 1) c ^= b;
+        while ((*line & 0300) == 0200) {
+          c <<= 6;
+          c |= *line++ & 0177;
+        }
+      }
+    } else {
+      free(freeme);
+      freeme = 0;
+      line = 0;
+      c = '\n';
+    }
+    t = dx;
+    dx = c;
+    return t;
+  } else {
+    PrintChar('\n');
+    exit(0);
   }
 }

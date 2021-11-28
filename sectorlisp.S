@@ -23,12 +23,13 @@
 // Compatible with the original hardware
 
 	.code16
-	.set	save,-10
-	.set	look,start+2
+	.set	save,-2-2
+	.set	look,start+5-2
 	.globl	_start
 _start:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
 kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
-start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
+start:	mov	$0x8000,%sp			# this should be safe we hope
+	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
 	.asciz	""
 kQuote:	.asciz	"QUOTE"
 kCond:	.asciz	"COND"
@@ -38,20 +39,17 @@ kCdr:	.asciz	"CDR"				# ordering matters
 kCons:	.asciz	"CONS"				# ordering matters
 kEq:	.asciz	"EQ"				# needs to be last
 
-begin:	mov	$2,%bx
-	mov	$0x8000,%cx
-main:	cli
-	push	%cs				# that means ss = ds = es = cs
+begin:	push	%cs				# that means ss = ds = es = cs
 	pop	%ds				# noting ljmp set cs to 0x7c00
 	push	%cs				# that's the bios load address
 	pop	%es				# therefore NULL points to NUL
 	push	%cs				# terminated NIL string above!
 	pop	%ss				# errata exists but don't care
-	xor	%sp,%sp				# use highest address as stack
-	sti
-	call	GetToken
+	mov	$2,%bx
+	mov	%sp,%cx
+main:	call	GetToken
 	call	GetObject
-	mov	%dx,save
+	mov	%dx,save(%bx)
 	call	Eval
 	test	%ax,%ax
 	jns	Print
@@ -69,7 +67,7 @@ Print:	xchg	%ax,%si
 
 GetToken:					# GetToken():al
 	mov	%cx,%di
-1:	mov	look,%al
+1:	mov	look(%bx),%al
 	cmp	$' ',%al
 	jbe	2f
 	stosb
@@ -79,12 +77,12 @@ GetToken:					# GetToken():al
 	jne	4f
 	dec	%di
 	jmp	2b
-4:	xchg	%ax,look
+4:	xchg	%ax,look(%bx)
 	cmp	$' ',%al
 	jbe	1b
 	cmp	$')',%al
 	jbe	3f
-	cmpb	$')',look
+	cmpb	$')',look(%bx)
 	ja	1b
 3:	mov	%bh,(%di)			# bh is zero
 	xchg	%si,%ax
@@ -147,7 +145,7 @@ Undef:	push	%ax
 	mov	$'?',%al
 	call	PutChar
 	pop	%ax
-	mov	save,%dx
+	mov	save(%bx),%dx
 	jmp	Print
 
 GetChar:xor	%ax,%ax				# GetChar→al:dl
