@@ -36,13 +36,13 @@ kCdr:	.asciz	"CDR"				# ordering matters
 kCons:	.asciz	"CONS"				# ordering matters
 kEq:	.asciz	"EQ"				# needs to be last
 
-begin:	xor	%sp,%sp				# use highest address as stack
-						# set independently of SS!
+begin:	mov	$0x8000,%sp			# uses higher address as stack
+						# and set independently of SS!
 						# 8088 doesn't stop interrupts
 						# after SS is set, and PC BIOS
 						# sets SP to a value that will
 						# damage our code if int fires
-						# between setting SS and SP
+						# between it setting SS and SP
 	push	%cs				# that means ss = ds = es = cs
 	pop	%ds				# noting ljmp set cs to 0x7c00
 	push	%cs				# that's the bios load address
@@ -50,7 +50,7 @@ begin:	xor	%sp,%sp				# use highest address as stack
 	push	%cs				# terminated NIL string above!
 	pop	%ss				# errata exists but don't care
 	mov	$2,%bx
-main:	mov	$0x8000,%cx			# dl (g_look) is zero or cr
+main:	mov	%sp,%cx
 	call	GetToken
 	call	GetObject
 	call	Eval
