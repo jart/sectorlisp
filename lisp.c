@@ -28,25 +28,27 @@
 #include <setjmp.h>
 #endif
 
-jmp_buf undefined;
-int cx, dx, M[0100000];
-int Null = sizeof(M) / sizeof(M[0]) / 2;
-char *line = "NIL T CAR CDR ATOM COND CONS QUOTE EQ ";
-int kT, kEq, kNil, kCar, kCdr, kCond, kAtom, kCons, kQuote;
+#define Null 0100000
 
-Get(i) {
-  return M[Null + i];
-}
+jmp_buf undefined;
+int cx, dx, M[Null * 2];
+int kT, kEq, kCar, kCdr, kCond, kAtom, kCons, kQuote;
+char *line = "NIL T CAR CDR ATOM COND CONS QUOTE EQ ";
 
 Set(i, x) {
   M[Null + i] = x;
 }
 
-Read() {
-  return ReadObject(ReadAtom(0));
+Get(i) {
+  return M[Null + i];
+}
+
+Hash(h, c) {
+  return h + c * 2;
 }
 
 Intern(x, y, i) {
+  i &= Null - 1;
   if (x == Get(i) && y == Get(i + 1)) return i;
   if (Get(i)) return Intern(x, y, i + 2);
   Set(i, x);
@@ -54,10 +56,17 @@ Intern(x, y, i) {
   return i;
 }
 
-ReadAtom(i) {
+ReadAtom(h) {
   int c = ReadChar();
-  if (c <= ' ') return ReadAtom(i);
-  return Intern(c, c > ')' && dx > ')' ? ReadAtom(0) : 0, i + c * 2);
+  if (c <= 32) return ReadAtom(h);
+  return Intern(c, c > 41 && dx > 41 ?
+                ReadAtom(Hash(h, c)) : 0,
+                Hash(h, c) - Hash(0, 78));
+}
+
+PrintAtom(x) {
+  do PrintChar(Get(x));
+  while ((x = Get(x + 1)));
 }
 
 AddList(x) {
@@ -66,36 +75,31 @@ AddList(x) {
 
 ReadList() {
   int t = ReadAtom(0);
-  if (Get(t) == ')') return kNil;
+  if (Get(t) == 41) return 0;
   return AddList(ReadObject(t));
 }
 
 ReadObject(t) {
-  if (Get(t) != '(') return t;
+  if (Get(t) != 40) return t;
   return ReadList();
 }
 
-PrintAtom(x) {
-  do PrintChar(Get(x));
-  while ((x = Get(x + 1)));
-}
-
 PrintList(x) {
-  PrintChar('(');
+  PrintChar(40);
   if (x < 0) {
     PrintObject(Car(x));
-    while ((x = Cdr(x)) != kNil) {
+    while ((x = Cdr(x))) {
       if (x < 0) {
-        PrintChar(' ');
+        PrintChar(32);
         PrintObject(Car(x));
       } else {
-        PrintChar(L'∙');
+        PrintChar(8729);
         PrintObject(x);
         break;
       }
     }
   }
-  PrintChar(')');
+  PrintChar(41);
 }
 
 PrintObject(x) {
@@ -108,7 +112,11 @@ PrintObject(x) {
 
 Print(e) {
   PrintObject(e);
-  PrintChar('\n');
+  PrintChar(10);
+}
+
+Read() {
+  return ReadObject(ReadAtom(0));
 }
 
 Car(x) {
@@ -142,18 +150,18 @@ Gc(A, x) {
 }
 
 Copy(x, m, k) {
-  return x < m ? Cons(Copy(Car(x), m, k), 
+  return x < m ? Cons(Copy(Car(x), m, k),
                       Copy(Cdr(x), m, k)) + k : x;
 }
 
 Evlis(m, a) {
-  return m != kNil ? Cons(Eval(Car(m), a),
-                          Evlis(Cdr(m), a)) : kNil;
+  return m ? Cons(Eval(Car(m), a),
+                  Evlis(Cdr(m), a)) : 0;
 }
 
 Pairlis(x, y, a) {
-  return x != kNil ? Cons(Cons(Car(x), Car(y)),
-                          Pairlis(Cdr(x), Cdr(y), a)) : a;
+  return x ? Cons(Cons(Car(x), Car(y)),
+                  Pairlis(Cdr(x), Cdr(y), a)) : a;
 }
 
 Assoc(x, y) {
@@ -163,9 +171,9 @@ Assoc(x, y) {
 }
 
 Evcon(c, a) {
-  if (Eval(Car(Car(c)), a) != kNil) {
+  if (Eval(Car(Car(c)), a)) {
     return Eval(Car(Cdr(Car(c))), a);
-  } else if (Cdr(c) != kNil) {
+  } else if (Cdr(c)) {
     return Evcon(Cdr(c), a);
   } else {
     longjmp(undefined, c);
@@ -174,9 +182,9 @@ Evcon(c, a) {
 
 Apply(f, x, a) {
   if (f < 0)      return Eval(Car(Cdr(Cdr(f))), Pairlis(Car(Cdr(f)), x, a));
-  if (f == kEq)   return Car(x) == Car(Cdr(x)) ? kT : kNil;
+  if (f == kEq)   return Car(x) == Car(Cdr(x)) ? kT : 0;
   if (f == kCons) return Cons(Car(x), Car(Cdr(x)));
-  if (f == kAtom) return Car(x) < 0 ? kNil : kT;
+  if (f == kAtom) return Car(x) < 0 ? 0 : kT;
   if (f == kCar)  return Car(Car(x));
   if (f == kCdr)  return Cdr(Car(x));
   return Apply(Assoc(f, a), x, a);
@@ -184,8 +192,8 @@ Apply(f, x, a) {
 
 Eval(e, a) {
   int A = cx;
-  if (e == kNil) return kNil;
-  if (e >= 0) return Assoc(e, a);
+  if (!e) return 0;
+  if (e > 0) return Assoc(e, a);
   if (Car(e) == kQuote) return Car(Cdr(e));
   if (Car(e) == kCond) {
     e = Evcon(Cdr(e), a);
@@ -195,11 +203,9 @@ Eval(e, a) {
   return Gc(A, e);
 }
 
-main() {
+Lisp() {
   int x, a;
-  setlocale(LC_ALL, "");
-  bestlineSetXlatCallback(bestlineUppercase);
-  kNil = ReadAtom(0);
+  ReadAtom(0);
   kT = ReadAtom(0);
   kCar = ReadAtom(0);
   kCdr = ReadAtom(0);
@@ -208,7 +214,7 @@ main() {
   kCons = ReadAtom(0);
   kQuote = ReadAtom(0);
   kEq = ReadAtom(0);
-  for (a = kNil;;) {
+  for (a = 0;;) {
     if (!(x = setjmp(undefined))) {
       x = Read();
       x = Eval(x, a);
@@ -216,7 +222,7 @@ main() {
         a = Cons(x, a);
       }
     } else {
-      PrintChar('?');
+      PrintChar(63);
     }
     Print(x);
   }
@@ -243,13 +249,19 @@ ReadChar() {
       free(freeme);
       freeme = 0;
       line = 0;
-      c = '\n';
+      c = 10;
     }
     t = dx;
     dx = c;
     return t;
   } else {
-    PrintChar('\n');
+    PrintChar(10);
     exit(0);
   }
+}
+
+main() {
+  setlocale(LC_ALL, "");
+  bestlineSetXlatCallback(bestlineUppercase);
+  Lisp();
 }
