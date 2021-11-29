@@ -1799,7 +1799,6 @@ static int enableRawMode(int fd) {
         raw = orig_termios;
         raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
         raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
-        raw.c_oflag &= ~OPOST;
         raw.c_iflag |= IUTF8;
         raw.c_cflag |= CS8;
         raw.c_cc[VMIN] = 1;
@@ -2464,6 +2463,7 @@ static void bestlineRefreshLineForce(struct bestlineState *l) {
 static void bestlineEditInsert(struct bestlineState *l,
                                const char *p, size_t n) {
     if (!bestlineGrow(l, l->len + n + 1)) return;
+    if (*p == ' ' && l->pos && l->buf[l->pos - 1] == ' ') return;
     memmove(l->buf + l->pos + n, l->buf + l->pos, l->len - l->pos);
     memcpy(l->buf + l->pos, p, n);
     l->pos += n;
@@ -3010,6 +3010,16 @@ static void bestlineEditSlurp(struct bestlineState *l) {
 }
 
 static void bestlineEditRaise(struct bestlineState *l) {
+    (void)l;
+}
+
+static char IsBalanced(struct bestlineState *l) {
+    int i, d;
+    for (d = i = 0; i < l->len; ++i) {
+        if (l->buf[i] == '(') ++d;
+        if (l->buf[i] == ')') --d;
+    }
+    return d <= 0;
 }
 
 /**
@@ -3112,14 +3122,18 @@ static ssize_t bestlineEdit(int stdin_fd, int stdout_fd, const char *prompt,
             }
             break;
         case '\r':
-            l.final = 1;
-            free(history[--historylen]);
-            history[historylen] = 0;
-            bestlineEditEnd(&l);
-            bestlineRefreshLineForce(&l);
-            if ((p = (char *)realloc(l.buf, l.len + 1))) l.buf = p;
-            *obuf = l.buf;
-            return l.len;
+            if (IsBalanced(&l)) {
+                l.final = 1;
+                free(history[--historylen]);
+                history[historylen] = 0;
+                bestlineEditEnd(&l);
+                bestlineRefreshLineForce(&l);
+                if ((p = (char *)realloc(l.buf, l.len + 1))) l.buf = p;
+                *obuf = l.buf;
+                return l.len;
+            } else {
+                break;
+            }
         case 033:
             if (nread < 2) break;
             switch (seq[1]) {
