@@ -56,10 +56,10 @@ function Intern(x, y, i) {
 
 function ReadAtom(h) {
   var c = ReadChar();
-  if (c <= 32) return ReadAtom(h);
-  return Intern(c, c > 41 && dx > 41 ?
+  if (c <= Ord(' ')) return ReadAtom(h);
+  return Intern(c, c > Ord(')') && dx > Ord(')') ?
                 ReadAtom(Hash(h, c)) : 0,
-                Hash(h, c) - Hash(0, 78));
+                Hash(h, c) - Hash(0, Ord('N')));
 }
 
 function PrintAtom(x) {
@@ -73,31 +73,31 @@ function AddList(x) {
 
 function ReadList() {
   var t = ReadAtom(0);
-  if (Get(t) == 41) return 0;
+  if (Get(t) == Ord(')')) return -0;
   return AddList(ReadObject(t));
 }
 
 function ReadObject(t) {
-  if (Get(t) != 40) return t;
+  if (Get(t) != Ord('(')) return t;
   return ReadList();
 }
 
 function PrintList(x) {
-  PrintChar(40);
+  PrintChar(Ord('('));
   if (x < 0) {
     PrintObject(Car(x));
     while ((x = Cdr(x))) {
       if (x < 0) {
-        PrintChar(32);
+        PrintChar(Ord(' '));
         PrintObject(Car(x));
       } else {
-        PrintChar(8729);
+        PrintChar(0x2219);
         PrintObject(x);
         break;
       }
     }
   }
-  PrintChar(41);
+  PrintChar(Ord(')'));
 }
 
 function PrintObject(x) {
@@ -110,7 +110,7 @@ function PrintObject(x) {
 
 function Print(e) {
   PrintObject(e);
-  PrintChar(10);
+  PrintChar(Ord('\n'));
 }
 
 function Read() {
@@ -154,7 +154,7 @@ function Copy(x, m, k) {
 
 function Evlis(m, a) {
   return m ? Cons(Eval(Car(m), a),
-                  Evlis(Cdr(m), a)) : 0;
+                  Evlis(Cdr(m), a)) : m;
 }
 
 function Pairlis(x, y, a) {
@@ -226,6 +226,10 @@ function Lisp() {
   }
 }
 
+Ord(c) {
+  return c;
+}
+
 Throw(x) {
   longjmp(undefined, x);
 }
@@ -252,13 +256,13 @@ ReadChar() {
       free(freeme);
       freeme = 0;
       line = 0;
-      c = 10;
+      c = Ord('\n');
     }
     t = dx;
     dx = c;
     return t;
   } else {
-    PrintChar(10);
+    PrintChar(Ord('\n'));
     exit(0);
   }
 }
