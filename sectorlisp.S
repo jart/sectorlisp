@@ -23,14 +23,13 @@
 // Compatible with the original hardware
 
 	.code16
-	.set	save,-2-2
-	.set	look,start+5-2
-	.globl	_start
+	.set	a,-2-2
+	.globl	_start				# LISP: VERITAS NUMQUAM PERIT
 _start:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
 kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
-start:	mov	$0x8000,%sp			# this should be safe we hope
-	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
+start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
 	.asciz	""
+kDefine:.asciz	"DEFINE"
 kQuote:	.asciz	"QUOTE"
 kCond:	.asciz	"COND"
 kAtom:	.asciz	"ATOM"				# ordering matters
@@ -39,27 +38,38 @@ kCdr:	.asciz	"CDR"				# ordering matters
 kCons:	.asciz	"CONS"				# ordering matters
 kEq:	.asciz	"EQ"				# needs to be last
 
-begin:	push	%cs				# that means ss = ds = es = cs
-	pop	%ds				# noting ljmp set cs to 0x7c00
-	push	%cs				# that's the bios load address
-	pop	%es				# therefore NULL points to NUL
-	push	%cs				# terminated NIL string above!
-	pop	%ss				# errata exists but don't care
+Read:	call	GetToken
+	call	GetObject
+	ret
+
+Define:	call	Read
+	push	%ax
+	call	Read
+	pop	%di
+	call	Cons
+	xchg	%ax,%di
+	xchg	%bp,%ax
+	call	Cons
+	xchg	%ax,%bp
+	jmp	main
+
+begin:	mov	$0x8000,%sp
+	push	%cs
+	pop	%ds
+	push	%cs
+	pop	%es
+	push	%cs
+	pop	%ss
 	mov	$2,%bx
 	mov	%sp,%cx
-main:	call	GetToken
-	call	GetObject
-	mov	%dx,save(%bx)
+	xor	%bp,%bp
+main:	xor	%dx,%dx
+	call	Read
+	cmp	$kDefine,%ax
+	je	Define
+	mov	%bp,%dx
 	call	Eval
-	test	%ax,%ax
-	jns	Print
-	push	%ax
-	xchg	%ax,%di
-	xchg	%dx,%ax
-	call	Cons
-	xchg	%ax,%dx
-	pop	%ax
-Print:	xchg	%ax,%si
+Catch:	xchg	%ax,%si
 	call	PrintObject
 	mov	$'\r',%al
 	call	PutChar
@@ -67,26 +77,25 @@ Print:	xchg	%ax,%si
 
 GetToken:					# GetToken():al
 	mov	%cx,%di
-1:	mov	look(%bx),%al
+1:	mov	%dl,%al
 	cmp	$' ',%al
 	jbe	2f
 	stosb
 	xchg	%ax,%si
 2:	call	GetChar				# exchanges dx and ax
 	cmp	$'\b',%al
-	jne	4f
-	dec	%di
-	jmp	2b
-4:	xchg	%ax,look(%bx)
+	je	4f
 	cmp	$' ',%al
 	jbe	1b
 	cmp	$')',%al
 	jbe	3f
-	cmpb	$')',look(%bx)
+	cmp	$')',%dl
 	ja	1b
 3:	mov	%bh,(%di)			# bh is zero
 	xchg	%si,%ax
 	ret
+4:	dec	%di
+	jmp	2b
 
 .PrintList:
 	mov	$'(',%al
@@ -106,7 +115,7 @@ GetToken:					# GetToken():al
 .PutObject:					# .PutObject(c:al,x:si)
 .PrintString:					# nul-terminated in si
 	call	PutChar				# preserves si
-PrintObject:					# PrintObject(x:si)
+PrintObject:					# PrintObject(x:si,a:di)
 	test	%si,%si				# set sf=1 if cons
 	js	.PrintList			# jump if not cons
 .PrintAtom:
@@ -121,39 +130,42 @@ GetObject:					# called just after GetToken
 #	jmp	Intern
 
 Intern:	push	%cx				# Intern(cx,di): ax
-	mov	%di,%bp
-	sub	%cx,%bp
-	inc	%bp
+	sub	%cx,%di
+	inc	%di
+	push	%di
 	xor	%di,%di
-1:	pop	%si
+1:	pop	%cx
+	pop	%si
 	push	%si
-	mov	%bp,%cx
+	push	%cx
 	mov	%di,%ax
 	cmp	%bh,(%di)
-	je	2f
+	je	8f
 	rep cmpsb				# memcmp(di,si,cx)
 	je	9f
-	not	%cx
 	xor	%ax,%ax
-	repne scasb				# memchr(di,al,cx)
+2:	scasb
+	jne	2b
 	jmp	1b
-2:	rep movsb				# memcpy(di,si,cx)
+8:	rep movsb				# memcpy(di,si,cx)
 9:	pop	%cx
-3:	ret
+	pop	%cx
+	ret
 
 Undef:	push	%ax
 	mov	$'?',%al
 	call	PutChar
 	pop	%ax
-	mov	save(%bx),%dx
-	jmp	Print
+	jmp	Catch
 
 GetChar:xor	%ax,%ax				# GetChar→al:dl
 	int	$0x16				# get keystroke
 PutChar:mov	$0x0e,%ah			# prints CP-437
+	push	%bp				# scroll up bug
 	int	$0x10				# vidya service
+	pop	%bp				# scroll up bug
 	cmp	$'\r',%al			# don't clobber
-	jne	3b				# look xchg ret
+	jne	1f				# look xchg ret
 	mov	$'\n',%al
 	jmp	PutChar
 
@@ -213,7 +225,12 @@ Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
 	mov	(%bx,%si),%si
 	scasw
 	jne	1b
-	jmp	Car
+	.byte	0xf6
+Cadr:	mov	(%bx,%di),%di			# contents of decrement register
+	.byte	0x3C				# cmp §scasw,%al (nop next byte)
+Cdr:	scasw					# increments our data index by 2
+Car:	mov	(%di),%ax			# contents of address register!!
+2:	ret
 
 GetList:call	GetToken
 	cmp	$')',%al
@@ -255,16 +272,10 @@ Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
 	mov	(%bx,%si),%si			# si = Cdr(x)
 	lodsw					# si = Cadr(x)
 	je	Cons
-.isEq:	cmp	%di,%ax				# we know for certain it's eq
+.isEq:	xor	%di,%ax				# we know for certain it's eq
 	jne	.retF
-.retT:	mov	$kT,%ax
+.retT:	mov	$kT,%al
 	ret
-
-Cadr:	mov	(%bx,%di),%di			# contents of decrement register
-	.byte	0x3C				# cmp §scasw,%al (nop next byte)
-Cdr:	scasw					# increments our data index by 2
-Car:	mov	(%di),%ax			# contents of address register!!
-2:	ret
 
 1:	mov	(%bx,%di),%di			# di = Cdr(c)
 Evcon:	push	%di				# save c
@@ -309,6 +320,7 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 .sig:	.fill	510 - (. - _start), 1, 0xce
 	.word	0xAA55
 	.type	.sig,@object
+	.type	kDefine,@object
 	.type	kQuote,@object
 	.type	kCond,@object
 	.type	kAtom,@object

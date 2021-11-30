@@ -17,7 +17,7 @@ all:	lisp				\
 clean:;	$(RM) lisp lisp.o bestline.o sectorlisp.o sectorlisp.bin sectorlisp.bin.dbg
 
 lisp: lisp.o bestline.o
-lisp.o: lisp.c bestline.h
+lisp.o: lisp.js bestline.h
 bestline.o: bestline.c bestline.h
 
 sectorlisp.o: sectorlisp.S
@@ -28,3 +28,6 @@ sectorlisp.bin.dbg: sectorlisp.o
 
 sectorlisp.bin: sectorlisp.bin.dbg
 	objcopy -S -O binary sectorlisp.bin.dbg sectorlisp.bin
+
+%.o: %.js
+	$(COMPILE.c) -xc $(OUTPUT_OPTION) $<
