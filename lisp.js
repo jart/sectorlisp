@@ -336,8 +336,9 @@ function Lisp() {
           continue;
         }
         x = Eval(x, a);
-      } catch (x) {
+      } catch (z) {
         PrintChar(Ord('?'));
+        x = z;
       }
       Print(x);
       Gc(A, 0);
