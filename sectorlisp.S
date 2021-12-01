@@ -24,7 +24,7 @@
 
 	.code16
 	.set	a,-2-2
-	.globl	_start				# LISP: VERITAS NUMQUAM PERIT
+	.globl	_start
 _start:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
 kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
 start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
