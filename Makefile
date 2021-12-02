@@ -6,12 +6,17 @@ CLEANFILES =				\
 	bestline.o			\
 	sectorlisp.o			\
 	sectorlisp.bin			\
-	sectorlisp.bin.dbg
+	sectorlisp.bin.dbg		\
+	brainfuck.o			\
+	brainfuck.bin			\
+	brainfuck.bin.dbg
 
 .PHONY:	all
 all:	lisp				\
 	sectorlisp.bin			\
-	sectorlisp.bin.dbg
+	sectorlisp.bin.dbg		\
+	brainfuck.bin			\
+	brainfuck.bin.dbg
 
 .PHONY:	clean
 clean:;	$(RM) lisp lisp.o bestline.o sectorlisp.o sectorlisp.bin sectorlisp.bin.dbg
@@ -28,6 +33,15 @@ sectorlisp.bin.dbg: sectorlisp.o
 
 sectorlisp.bin: sectorlisp.bin.dbg
 	objcopy -S -O binary sectorlisp.bin.dbg sectorlisp.bin
+
+brainfuck.o: brainfuck.S
+	$(AS) -g -o $@ $<
+
+brainfuck.bin.dbg: brainfuck.o
+	$(LD) -oformat:binary -Ttext=0x7c00 -o $@ $<
+
+brainfuck.bin: brainfuck.bin.dbg
+	objcopy -S -O binary brainfuck.bin.dbg brainfuck.bin
 
 %.o: %.js
 	$(COMPILE.c) -xc $(OUTPUT_OPTION) $<
