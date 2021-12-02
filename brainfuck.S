@@ -2,6 +2,7 @@
 │vi: set et ft=asm ts=8 tw=8 fenc=utf-8                                     :vi│
 ╞══════════════════════════════════════════════════════════════════════════════╡
 │ Copyright 2021 Justine Alexandra Roberts Tunney                              │
+│ Some size optimisations by Peter Ferrie                                      │
 │                                                                              │
 │ Permission to use, copy, modify, and/or distribute this software for         │
 │ any purpose with or without fee is hereby granted, provided that the         │
@@ -17,7 +18,7 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 
-//	compliant brainfuck in 87 bytes
+//	compliant brainfuck in 83 bytes
 //	boots from bios on pc w/ 128kb+
 
 	.code16
@@ -35,21 +36,22 @@ Brain:	xor	%ax,%ax
 	mov	%al,(%si)
 	inc	%dx
 Fuck:	lodsb
+        cbw
 	cmp	$'>',%al
 	je	Right
 	cmp	$'<',%al
 	je	Left
-	cmp	$'+',%al
+	sub	$'+',%al
 	je	Inc
-	cmp	$'-',%al
-	je	Dec
-	cmp	$'.',%al
-	je	Put
-	cmp	$',',%al
+	dec	%ax
 	je	Get
-	cmp	$']',%al
+	dec	%ax
+	je	Dec
+	dec	%ax
+	je	Put
+	cmp	$']'-'.',%al
 	je	Loop
-	cmp	$'[',%al
+	cmp	$'['-'.',%al
 	jne	Brain
 Do:	push	%si
 Loop:	pop	%ax
@@ -59,8 +61,6 @@ Loop:	pop	%ax
 	xchg	%ax,%si
 	jmp	Brain
 Inc:	incb	(%di)
-	.byte	0x3C
-Left:	dec	%di
 	.byte	0x80
 Dec:	decb	(%di)
 	.byte	0x3C
@@ -71,5 +71,6 @@ Put:	mov	$0x0e,%ah
 	int	$0x10
 	jmp	Brain
 Get:	int	$0x16
-	mov	%al,(%di)
+	stosb
+Left:	dec	%di
 	jmp	Brain
