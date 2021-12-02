@@ -18,7 +18,7 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 
-//	compliant brainfuck in 83 bytes
+//	compliant brainfuck in 82 bytes
 //	boots from bios on pc w/ 128kb+
 
 	.code16
@@ -37,30 +37,34 @@ Brain:	xor	%ax,%ax
 	inc	%dx
 Fuck:	lodsb
         cbw
-	cmp	$'>',%al
-	je	Right
-	cmp	$'<',%al
-	je	Left
 	sub	$'+',%al
-	je	Inc
+	jz	Inc		# + 43
 	dec	%ax
-	je	Get
+	jz	Get		# , 44
 	dec	%ax
-	je	Dec
+	jz	Dec		# - 45
 	dec	%ax
-	je	Put
+	jz	Put		# . 46
+	cmp	$'>'-'.',%al
+	je	Right		# > 60 14
+	cmp	$'<'-'.',%al
+	je	Left		# < 62 16
 	cmp	$']'-'.',%al
-	je	Loop
+	je	Loop		# ] 91 45
 	cmp	$'['-'.',%al
-	jne	Brain
+	jne	Brain		# [ 93 47
 Do:	push	%si
 Loop:	pop	%ax
 	cmpb	%ah,(%di)
 	jz	Brain
 	push	%ax
 	xchg	%ax,%si
-	jmp	Brain
+	.byte	0x80
 Inc:	incb	(%di)
+	jmp	Brain
+Get:	int	$0x16
+	stosb
+Left:	dec	%di
 	.byte	0x80
 Dec:	decb	(%di)
 	.byte	0x3C
@@ -69,8 +73,4 @@ Right:	inc	%di
 Put:	mov	$0x0e,%ah
 	mov	(%di),%al
 	int	$0x10
-	jmp	Brain
-Get:	int	$0x16
-	stosb
-Left:	dec	%di
 	jmp	Brain
