@@ -51,7 +51,7 @@ function Cdr(x) {
   if (x < 0) {
     return Get(x + 1);
   } else {
-    Throw(x + 1);
+    Throw(x);
   }
 }
 
@@ -157,7 +157,7 @@ function Copy(x, m, k) {
 
 function Evlis(m, a) {
   return m ? Cons(Eval(Car(m), a),
-                  Evlis(Cdr(m), a)) : 0;
+                  Evlis(Cdr(m), a)) : m;
 }
 
 function Pairlis(x, y, a) {
@@ -257,7 +257,6 @@ ReadChar() {
     dx = c;
     return t;
   } else {
-    PrintChar('\n');
     exit(0);
   }
 }
