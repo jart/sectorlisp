@@ -144,6 +144,7 @@ Intern:	push	%cx				# Intern(cx,di): ax
 	rep cmpsb				# memcmp(di,si,cx)
 	je	9f
 	xor	%ax,%ax
+	dec	%di
 2:	scasb
 	jne	2b
 	jmp	1b
