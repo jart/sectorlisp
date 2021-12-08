@@ -123,6 +123,7 @@ Intern:	push	%cx				# Intern(cx,di): ax
 	je	8f
 	rep cmpsb				# memcmp(di,si,cx)
 	je	9f
+	dec	%di
 	xor	%ax,%ax
 2:	scasb					# memchr(di,al,cx)
 	jne	2b
@@ -175,6 +176,14 @@ Cons:	xchg	%di,%cx				# Cons(m:di,a:ax):ax
 1:	xchg	%di,%ax
 	ret
 
+GetList:call	GetToken
+	cmp	$')',%al
+	je	.retF
+	call	GetObject
+	push	%ax				# popped by xCons
+	call	GetList
+	jmp	xCons
+
 Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
 	jb	1b				# we assume immutable cells
 	push	(%bx,%di)			# mark prevents negative gc
@@ -188,14 +197,6 @@ Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
 	sub	%si,%ax				# ax -= C - B
 	add	%dx,%ax
 	ret
-
-GetList:call	GetToken
-	cmp	$')',%al
-	je	.retF
-	call	GetObject
-	push	%ax				# popped by xCons
-	call	GetList
-	jmp	xCons
 
 .dflt1:	push	%si				# save x
 	call	Eval
