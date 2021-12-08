@@ -24,12 +24,12 @@ exit
 #endif
 #define var int
 #define function
-#define Null 0100000
+#define Null 16384
 var M[Null * 2];
 jmp_buf undefined;
 //`
 
-var cx, dx, kT, kEq, kCar, kCdr, kCond, kAtom, kCons, kQuote, kDefine;
+var cx, dx, lo, kT, kEq, kCar, kCdr, kCond, kAtom, kCons, kQuote, kDefine;
 
 function Set(i, x) {
   M[Null + i] = x;
@@ -58,6 +58,7 @@ function Cdr(x) {
 function Cons(car, cdr) {
   Set(--cx, cdr);
   Set(--cx, car);
+  if (cx < lo) lo = cx;
   return cx;
 }
 
@@ -137,17 +138,21 @@ function Read() {
   return ReadObject(ReadAtom(0));
 }
 
-function Define(a) {
-  var x = Read();
-  return Cons(Cons(x, Read()), a);
+function Remove(x, y) {
+  if (!y) return y;
+  if (x == Car(Car(y))) return Cdr(y);
+  return Cons(Car(y), Remove(x, Cdr(y)));
+}
+
+function Define(x, y) {
+  return Cons(Cons(x, Read()), Remove(x, y));
 }
 
 function Gc(A, x) {
   var C, B = cx;
   x = Copy(x, A, A - B), C = cx;
   while (C < B) Set(--A, Get(--B));
-  cx = A;
-  return x;
+  return cx = A, x;
 }
 
 function Copy(x, m, k) {
@@ -196,12 +201,8 @@ function Eval(e, a) {
   if (!e) return e;
   if (e > 0) return Assoc(e, a);
   if (Car(e) == kQuote) return Car(Cdr(e));
-  if (Car(e) == kCond) {
-    e = Evcon(Cdr(e), a);
-  } else {
-    e = Apply(Car(e), Evlis(Cdr(e), a), a);
-  }
-  return Gc(A, e);
+  if (Car(e) == kCond) return Gc(A, Evcon(Cdr(e), a));
+  return Gc(A, Apply(Car(e), Evlis(Cdr(e), a), a));
 }
 
 function LoadBuiltins() {
@@ -231,6 +232,9 @@ Throw(x) {
 
 PrintChar(b) {
   fputwc(b, stdout);
+}
+
+SaveMachine(a) {
 }
 
 ReadChar() {
@@ -271,7 +275,8 @@ main() {
     if (!(x = setjmp(undefined))) {
       x = Read();
       if (x == kDefine) {
-        a = Gc(A, Define(a));
+        a = Gc(0, Define(Read(), a));
+        SaveMachine(a);
         continue;
       }
       x = Eval(x, a);
@@ -289,8 +294,8 @@ main() {
 ////////////////////////////////////////////////////////////////////////////////
 // JavaScript Specific Code for https://justine.lol/
 
-var a, code, index, M, Null;
-var eInput, eOutput, eSubmit, eClear, eLoad, ePrograms;
+var a, code, index, output, M, Null;
+var eInput, eOutput, eSubmit, eReset, eLoad, ePrograms;
 
 function Throw(x) {
   throw x;
@@ -300,9 +305,22 @@ function Ord(s) {
   return s.charCodeAt(0);
 }
 
+function Reset() {
+  var i;
+  a = 0;
+  cx = 0;
+  lo = 0;
+  Null = 16384;
+  M = new Array(Null * 2);
+  for (i = 0; i < M.length; ++i) {
+    M[i] = 0; /* make json smaller */
+  }
+  Load("NIL T EQ CAR CDR ATOM COND CONS QUOTE DEFINE ");
+  LoadBuiltins()
+}
+
 function PrintChar(c) {
-  eOutput.innerText += String.fromCharCode(c);
-  SaveOutput();
+  output += String.fromCharCode(c);
 }
 
 function ReadChar() {
@@ -323,6 +341,8 @@ function ReadChar() {
 
 function Lisp() {
   var x, A;
+  lo = cx;
+  output = '';
   while (dx) {
     if (dx <= Ord(' ')) {
       ReadChar();
@@ -331,7 +351,7 @@ function Lisp() {
       try {
         x = Read();
         if (x == kDefine) {
-          a = Gc(A, Define(a));
+          a = Gc(0, Define(Read(), a));
           continue;
         }
         x = Eval(x, a);
@@ -343,6 +363,10 @@ function Lisp() {
       Gc(A, 0);
     }
   }
+  eOutput.innerText = output;
+  SaveMachine(a);
+  SaveOutput();
+  ReportUsage();
 }
 
 function Load(s) {
@@ -352,13 +376,28 @@ function Load(s) {
 }
 
 function OnSubmit() {
-  Load(eInput.value);
+  Load(eInput.value.toUpperCase());
   Lisp();
 }
 
-function OnClear() {
-  eOutput.innerText = "";
+function Dump(a) {
+  if (!a) return;
+  Dump(Cdr(a));
+  output += "DEFINE ";
+  PrintObject(Car(Car(a)));
+  output += " ";
+  PrintObject(Cdr(Car(a)));
+  output += "\n";
+}
+
+function OnReset() {
+  output = "";
+  Dump(a);
+  eOutput.innerText = output;
+  Reset();
+  localStorage.removeItem("sectorlisp.machine");
   SaveOutput();
+  ReportUsage();
 }
 
 function OnLoad() {
@@ -366,33 +405,65 @@ function OnLoad() {
 }
 
 function OnWindowClick(event) {
-  if (!event.target.matches('#load')) {
+  if (!event.target.matches("#load")) {
     ePrograms.classList.remove("show");
   }
 }
 
-function SaveOutput() {
-  if (typeof localStorage != 'undefined') {
-    localStorage.setItem('output', eOutput.innerText);
+function SaveMachine(a) {
+  var machine;
+  if (typeof localStorage != "undefined") {
+    machine = [M, a, cx];
+    localStorage.setItem("sectorlisp.machine", JSON.stringify(machine));
   }
 }
 
+function RestoreMachine() {
+  var machine;
+  if (typeof localStorage != "undefined" &&
+      (machine = JSON.parse(localStorage.getItem("sectorlisp.machine")))) {
+    M = machine[0];
+    a = machine[1];
+    cx = machine[2];
+    lo = cx;
+  }
+}
+
+function SaveOutput() {
+  if (typeof localStorage != "undefined") {
+    localStorage.setItem("input", document.getElementById("input").value);
+    localStorage.setItem("output", eOutput.innerText);
+  }
+}
+
+function Number(i) {
+  return i.toLocaleString();
+}
+
+function ReportUsage() {
+  var i, c;
+  for (c = i = 0; i < Null; i += 2) {
+    if (Get(i)) ++c;
+  }
+  document.getElementById("usage").innerText =
+      Number((-cx >> 1) + c) + " / " +
+      Number((-lo >> 1) + c) + " / " +
+      Number(Null) + " doublewords";
+}
+
 function SetUp() {
-  a = 0;
-  cx = 0;
-  Null = 0100000;
-  M = new Array(Null * 2);
-  Load("NIL T EQ CAR CDR ATOM COND CONS QUOTE DEFINE ");
-  LoadBuiltins()
-  eLoad = document.getElementById('load');
-  eInput = document.getElementById('input');
-  eClear = document.getElementById('clear');
-  eOutput = document.getElementById('output');
-  eSubmit = document.getElementById('submit');
+  Reset();
+  RestoreMachine();
+  ReportUsage();
+  eLoad = document.getElementById("load");
+  eInput = document.getElementById("input");
+  eReset = document.getElementById("reset");
+  eOutput = document.getElementById("output");
+  eSubmit = document.getElementById("submit");
   ePrograms = document.getElementById("programs");
   window.onclick = OnWindowClick;
   eSubmit.onclick = OnSubmit;
-  eClear.onclick = OnClear;
+  eReset.onclick = OnReset;
   eLoad.onclick = OnLoad;
 }
 
