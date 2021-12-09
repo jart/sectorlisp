@@ -140,23 +140,10 @@ PutChar:mov	$0x0e,%ah			# prints CP-437
 	jne	1f				# look xchg ret
 	mov	$'\n',%al
 	jmp	PutChar
-
-////////////////////////////////////////////////////////////////////////////////
-
-Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):ax
-	jz	1f				# jump if nil
-	push	(%bx,%di)			# save 1 Cdr(x)
-	lodsw
-	push	(%si)				# save 2 Cdr(y)
-	mov	(%di),%di
-	call	Cons				# preserves dx
-	pop	%si				# restore 2
-	pop	%di				# restore 1
-	push	%ax				# save 3
-	call	Pairlis
-	jmp	xCons				# can be inlined here
 1:	xchg	%dx,%ax
 	ret
+
+////////////////////////////////////////////////////////////////////////////////
 
 Evlis:	test	%di,%di				# Evlis(m:di,a:dx):ax
 	jz	1f				# jump if nil
@@ -170,7 +157,7 @@ Evlis:	test	%di,%di				# Evlis(m:di,a:dx):ax
 
 xCons:	pop	%di				# restore 2
 Cons:	xchg	%di,%cx				# Cons(m:di,a:ax):ax
-	mov	%cx,(%di)
+	mov	%cx,(%di)			# must preserve si
 	mov	%ax,(%bx,%di)
 	lea	4(%di),%cx
 1:	xchg	%di,%ax
@@ -207,12 +194,21 @@ Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
 	jns	.switch				# jump if atom
 	xchg	%ax,%di				# di = fn
 .lambda:mov	(%bx,%di),%di			# di = Cdr(fn)
-	push	%di				# save 1
+	push	%di				# for .EvCadr
 	mov	(%di),%di			# di = Cadr(fn)
-	call	Pairlis
-	xchg	%ax,%dx
-	pop	%di				# restore 1
-	jmp	.EvCadr
+Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
+	jz	.EvCadr				# return if x is nil
+	lodsw					# ax = Car(y)
+	push	(%bx,%di)			# push Cdr(x)
+	mov	(%di),%di			# di = Car(x)
+	mov	(%si),%si			# si = Cdr(y)
+	call	Cons				# Cons(Car(x),Car(y))
+	xchg	%ax,%di
+	xchg	%dx,%ax
+	call	Cons				# Cons(Cons(Car(x),Car(y)),a)
+	xchg	%ax,%dx				# a = new list
+	pop	%di				# grab Cdr(x)
+	jmp	Pairlis
 .switch:cmp	$kEq,%ax			# eq is last builtin atom
 	ja	.dflt1				# ah is zero if not above
 	mov	(%si),%di			# di = Car(x)
@@ -255,8 +251,9 @@ Evcon:	push	%di				# save c
 	pop	%di				# restore c
 	test	%ax,%ax				# nil test
 	jz	1b
-	mov	(%di),%di			# di = Car(c)
-.EvCadr:call	Cadr				# ax = Cadar(c)
+	push	(%di)				# push Car(c)
+.EvCadr:pop	%di
+	call	Cadr				# ax = Cadar(c)
 #	jmp	Eval
 
 Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
