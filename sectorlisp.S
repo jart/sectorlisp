@@ -23,7 +23,6 @@
 // Compatible with the original hardware
 
 	.code16
-	.set	a,-2-2
 	.globl	_start
 _start:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
 kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
@@ -37,43 +36,6 @@ kCar:	.asciz	"CAR"				# ordering matters
 kCdr:	.asciz	"CDR"				# ordering matters
 kCons:	.asciz	"CONS"				# ordering matters
 kEq:	.asciz	"EQ"				# needs to be last
-
-Read:	call	GetToken
-	call	GetObject
-	ret
-
-Define:	call	Read
-	push	%ax
-	call	Read
-	pop	%di
-	call	Cons
-	xchg	%ax,%di
-	xchg	%bp,%ax
-	call	Cons
-	xchg	%ax,%bp
-	jmp	main
-
-begin:	mov	$0x8000,%sp
-	push	%cs
-	pop	%ds
-	push	%cs
-	pop	%es
-	push	%cs
-	pop	%ss
-	mov	$2,%bx
-	mov	%sp,%cx
-	xor	%bp,%bp
-main:	xor	%dx,%dx
-	call	Read
-	cmp	$kDefine,%ax
-	je	Define
-	mov	%bp,%dx
-	call	Eval
-Catch:	xchg	%ax,%si
-	call	PrintObject
-	mov	$'\r',%al
-	call	PutChar
-	jmp	main
 
 GetToken:					# GetToken():al
 	mov	%cx,%di
@@ -153,12 +115,6 @@ Intern:	push	%cx				# Intern(cx,di): ax
 	pop	%cx
 	ret
 
-Undef:	push	%ax
-	mov	$'?',%al
-	call	PutChar
-	pop	%ax
-	jmp	Catch
-
 GetChar:xor	%ax,%ax				# GetChar→al:dl
 	int	$0x16				# get keystroke
 PutChar:mov	$0x0e,%ah			# prints CP-437
@@ -205,20 +161,6 @@ Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
 	sub	%si,%ax				# ax -= C - B
 	add	%dx,%ax
 	ret
-
-Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
-1:	test	%si,%si
-	jns	Undef
-	mov	(%si),%di
-	mov	(%bx,%si),%si
-	scasw
-	jne	1b
-	.byte	0xf6
-Cadr:	mov	(%bx,%di),%di			# contents of decrement register
-	.byte	0x3C				# cmp §scasw,%al (nop next byte)
-Cdr:	scasw					# increments our data index by 2
-Car:	mov	(%di),%ax			# contents of address register!!
-2:	ret
 
 GetList:call	GetToken
 	cmp	$')',%al
@@ -274,6 +216,20 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 .retT:	mov	$kT,%al
 	ret
 
+Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
+1:	test	%si,%si
+	jns	Undef
+	mov	(%si),%di
+	mov	(%bx,%si),%si
+	scasw
+	jne	1b
+	.byte	0xf6
+Cadr:	mov	(%bx,%di),%di			# contents of decrement register
+	.byte	0x3C				# cmp §scasw,%al (nop next byte)
+Cdr:	scasw					# increments our data index by 2
+Car:	mov	(%di),%ax			# contents of address register!!
+2:	ret
+
 1:	mov	(%bx,%di),%di			# di = Cdr(c)
 Evcon:	push	%di				# save c
 	mov	(%di),%si			# di = Car(c)
@@ -314,6 +270,49 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 	mov	%di,%cx				# cx = A + (C - B)
 	pop	%dx				# restore a
 1:	ret
+
+Undef:	push	%ax
+	mov	$'?',%al
+	call	PutChar
+	pop	%ax
+	jmp	Catch
+
+Read:	call	GetToken
+	call	GetObject
+	ret
+
+Define:	call	Read
+	push	%ax
+	call	Read
+	pop	%di
+	call	Cons
+	xchg	%ax,%di
+	xchg	%bp,%ax
+	call	Cons
+	xchg	%ax,%bp
+	jmp	main
+
+begin:	mov	$0x8000,%sp
+	push	%cs
+	pop	%ds
+	push	%cs
+	pop	%es
+	push	%cs
+	pop	%ss
+	mov	$2,%bx
+	mov	%sp,%cx
+	xor	%bp,%bp
+main:	xor	%dx,%dx
+	call	Read
+	cmp	$kDefine,%ax
+	je	Define
+	mov	%bp,%dx
+	call	Eval
+Catch:	xchg	%ax,%si
+	call	PrintObject
+	mov	$'\r',%al
+	call	PutChar
+	jmp	main
 
 .sig:	.fill	510 - (. - _start), 1, 0xce
 	.word	0xAA55
