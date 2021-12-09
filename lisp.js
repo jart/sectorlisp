@@ -392,9 +392,13 @@ function Dump(a) {
 
 function OnReset() {
   output = "";
-  Dump(a);
-  eOutput.innerText = output;
-  Reset();
+  try {
+    Dump(a);
+    eOutput.innerText = output;
+    Reset();
+  } catch (e) {
+    /* ignored */
+  }
   localStorage.removeItem("sectorlisp.machine");
   SaveOutput();
   ReportUsage();
@@ -452,9 +456,6 @@ function ReportUsage() {
 }
 
 function SetUp() {
-  Reset();
-  RestoreMachine();
-  ReportUsage();
   eLoad = document.getElementById("load");
   eInput = document.getElementById("input");
   eReset = document.getElementById("reset");
@@ -465,6 +466,9 @@ function SetUp() {
   eSubmit.onclick = OnSubmit;
   eReset.onclick = OnReset;
   eLoad.onclick = OnLoad;
+  Reset();
+  RestoreMachine();
+  ReportUsage();
 }
 
 SetUp();
