@@ -18,25 +18,28 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 
-//	compliant brainfuck in 82 bytes
-//	boots from bios on pc w/ 128kb+
+//	compliant brainf*#k in 99 bytes
+//	++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++
+//	..+++.>>.<-.<.+++.------.--------.>>+.>++.[]$
 
 	.code16
 	.globl	_start
-_start:	mov	$0x10000>>4,%di
+_start:	mov	$0x7e00,%di
 	push	%di
-	pop	%ds
-	push	%di
-	pop	%es
-	mov	%si,%dx
-Brain:	xor	%ax,%ax
-	cmp	%dx,%si
-	jb	Fuck
+Load:	xor	%ax,%ax
 	int	$0x16
-	mov	%al,(%si)
-	inc	%dx
-Fuck:	lodsb
+	stosb
+	cmp	$'[',%al
+	je	Lsb
+	cmp	$']',%al
+	je	Rsb
+	cmp	$'$',%al
+	jne	Load
+	pop	%si
+Brain:	lodsb
         cbw
+	mov	$0x0e,%bh
+	mov	(%di),%bl
 	sub	$'+',%al
 	jz	Inc		# + 43
 	dec	%ax
@@ -53,12 +56,14 @@ Fuck:	lodsb
 	je	Loop		# ] 91 45
 	cmp	$'['-'.',%al
 	jne	Brain		# [ 93 47
-Do:	push	%si
-Loop:	pop	%ax
-	cmpb	%ah,(%di)
+Do:	cmp	$1,%bl
+	sbb	%bl,%bl
+Loop:	test	%bl,%bl
+	lodsw
 	jz	Brain
-	push	%ax
 	xchg	%ax,%si
+	inc	%si
+	inc	%si
 	.byte	0x80
 Inc:	incb	(%di)
 	jmp	Brain
@@ -70,7 +75,18 @@ Dec:	decb	(%di)
 	.byte	0x3C
 Right:	inc	%di
 	.byte	0x84
-Put:	mov	$0x0e,%ah
-	mov	(%di),%al
+Put:	xchg	%bx,%ax
 	int	$0x10
 	jmp	Brain
+Rsb:	pop	%si
+	mov	%di,(%si)
+	xchg	%si,%ax
+	.byte	0x3c
+Lsb:	push	%di
+	stosw
+	jmp	Load
+
+Sig:	.fill	510 - (. - _start), 1, 0xce
+	.word	0xAA55
+	.type	Sig,@object
+
