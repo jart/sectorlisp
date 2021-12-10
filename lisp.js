@@ -43,7 +43,7 @@ function Car(x) {
   if (x < 0) {
     return Get(x);
   } else {
-    Throw(x);
+    Throw(List(kCar, x));
   }
 }
 
@@ -51,7 +51,7 @@ function Cdr(x) {
   if (x < 0) {
     return Get(x + 1);
   } else {
-    Throw(x);
+    Throw(List(kCdr, x));
   }
 }
 
@@ -144,6 +144,10 @@ function Remove(x, y) {
   return Cons(Car(y), Remove(x, Cdr(y)));
 }
 
+function List(x, y) {
+  return Cons(x, Cons(y, 0));
+}
+
 function Define(x, y) {
   return Cons(Cons(x, Read()), Remove(x, y));
 }
@@ -166,6 +170,7 @@ function Evlis(m, a) {
 }
 
 function Pairlis(x, y, a) {
+  if (!!x ^ !!y) Throw(List(x, y));
   return x ? Cons(Cons(Car(x), Car(y)),
                   Pairlis(Cdr(x), Cdr(y), a)) : a;
 }
