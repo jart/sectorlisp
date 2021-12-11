@@ -27,14 +27,14 @@
 _start:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
 kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
 start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
-	.asciz	""
-kQuote:	.asciz	"QUOTE"
-kCond:	.asciz	"COND"
-kAtom:	.asciz	"ATOM"				# ordering matters
-kCar:	.asciz	"CAR"				# ordering matters
+	.asciz	""				# interned strings
+kQuote:	.asciz	"QUOTE"				# builtin for eval
+kCond:	.asciz	"COND"				# builtin for eval
+kCar:	.asciz	"CAR"				# builtin to apply
 kCdr:	.asciz	"CDR"				# ordering matters
-kCons:	.asciz	"CONS"				# ordering matters
-kEq:	.asciz	"EQ"				# needs to be last
+kCons:	.asciz	"CONS"				# must be 3rd last
+kEq:	.asciz	"EQ"				# must be 2nd last
+kAtom:	.asciz	"ATOM"				# needs to be last
 
 begin:	mov	$0x8000,%sp			# uses higher address as stack
 						# and set independently of SS!
@@ -125,7 +125,7 @@ Intern:	push	%cx				# Intern(cx,di): ax
 	je	9f
 	dec	%di
 	xor	%ax,%ax
-2:	scasb					# memchr(di,al,cx)
+2:	scasb					# rawmemchr(di,al)
 	jne	2b
 	jmp	1b
 8:	rep movsb				# memcpy(di,si,cx)
@@ -137,16 +137,16 @@ GetChar:xor	%ax,%ax				# GetChar→al:dl
 PutChar:mov	$0x0e,%ah			# prints CP-437
 	int	$0x10				# vidya service
 	cmp	$'\r',%al			# don't clobber
-	jne	1f				# look xchg ret
+	jne	.RetDx				# look xchg ret
 	mov	$'\n',%al
 	jmp	PutChar
-1:	xchg	%dx,%ax
+.RetDx:	xchg	%dx,%ax
 	ret
 
 ////////////////////////////////////////////////////////////////////////////////
 
 Evlis:	test	%di,%di				# Evlis(m:di,a:dx):ax
-	jz	1f				# jump if nil
+	jz	.RetDi				# jump if nil
 	push	(%bx,%di)			# save 1 Cdr(m)
 	mov	(%di),%ax
 	call	Eval
@@ -160,7 +160,7 @@ Cons:	xchg	%di,%cx				# Cons(m:di,a:ax):ax
 	mov	%cx,(%di)			# must preserve si
 	mov	%ax,(%bx,%di)
 	lea	4(%di),%cx
-1:	xchg	%di,%ax
+.RetDi:	xchg	%di,%ax
 	ret
 
 GetList:call	GetToken
@@ -172,7 +172,7 @@ GetList:call	GetToken
 	jmp	xCons
 
 Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
-	jb	1b				# we assume immutable cells
+	jb	.RetDi				# we assume immutable cells
 	push	(%bx,%di)			# mark prevents negative gc
 	mov	(%di),%di
 	call	Gc
@@ -181,15 +181,13 @@ Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
 	call	Gc
 	pop	%di
 	call	Cons
-	sub	%si,%ax				# ax -= C - B
+	sub	%si,%ax
 	add	%dx,%ax
 	ret
 
-.dflt1:	push	%si				# save x
-	call	Eval
-	pop	%si				# restore x
-#	jmp	Apply
-
+.resolv:push	%si
+	call	Eval				# do (fn si) → ((λ ...) si)
+	pop	%si
 Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
 	jns	.switch				# jump if atom
 	xchg	%ax,%di				# di = fn
@@ -209,26 +207,25 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 	xchg	%ax,%dx				# a = new list
 	pop	%di				# grab Cdr(x)
 	jmp	Pairlis
-.switch:cmp	$kEq,%ax			# eq is last builtin atom
-	ja	.dflt1				# ah is zero if not above
+.switch:cmp	$kAtom,%ax			# atom: last builtin atom
+	ja	.resolv				# ah is zero if not above
 	mov	(%si),%di			# di = Car(x)
+	je	.ifAtom
+	cmp	$kCons,%al
+	jae	.ifCons
 .ifCar:	cmp	$kCar,%al
 	je	Car
-.ifCdr:	cmp	$kCdr,%al
-	je	Cdr
-.ifAtom:cmp	$kAtom,%al
-	jne	.ifCons
-	test	%di,%di				# test if atom
-	jns	.retT
-.retF:	xor	%ax,%ax				# ax = nil
-	ret
-.ifCons:cmp	$kCons,%al
-	mov	(%bx,%si),%si			# si = Cdr(x)
+.ifCdr:	jmp	Cdr
+.ifCons:mov	(%bx,%si),%si			# si = Cdr(x)
 	lodsw					# si = Cadr(x)
 	je	Cons
-.isEq:	xor	%di,%ax				# we know for certain it's eq
+.isEq:	xor	%ax,%di
 	jne	.retF
 .retT:	mov	$kT,%al
+	ret
+.ifAtom:test	%di,%di				# test if atom
+	jns	.retT
+.retF:	xor	%ax,%ax				# ax = nil
 	ret
 
 Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
@@ -241,7 +238,7 @@ Cadr:	mov	(%bx,%di),%di			# contents of decrement register
 	.byte	0x3C				# cmp §scasw,%al (nop next byte)
 Cdr:	scasw					# increments our data index by 2
 Car:	mov	(%di),%ax			# contents of address register!!
-2:	ret
+	ret
 
 1:	mov	(%bx,%di),%di			# di = Cdr(c)
 Evcon:	push	%di				# save c
