@@ -3,6 +3,7 @@ CFLAGS = -w -g
 CLEANFILES =				\
 	lisp				\
 	lisp.o				\
+	lisp.o				\
 	bestline.o			\
 	sectorlisp.o			\
 	sectorlisp.bin			\
@@ -19,7 +20,7 @@ all:	lisp				\
 	brainfuck.bin.dbg
 
 .PHONY:	clean
-clean:;	$(RM) lisp lisp.o bestline.o sectorlisp.o sectorlisp.bin sectorlisp.bin.dbg
+clean:;	$(RM) $(CLEANFILES)
 
 lisp: lisp.o bestline.o
 lisp.o: lisp.js bestline.h

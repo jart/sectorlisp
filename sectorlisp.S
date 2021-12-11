@@ -19,8 +19,13 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 
-// LISP meta-circular evaluator in a MBR
-// Compatible with the original hardware
+//	LISP meta-circular evaluator in a MBR
+//	Compatible with the original hardware
+
+//	This is the friendly extended version
+//	This adds (FOO . BAR) support to Read
+//	It print errors on undefined behavior
+//	It can also DEFINE persistent binding
 
 	.code16
 	.globl	_start
@@ -31,11 +36,11 @@ start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
 kDefine:.asciz	"DEFINE"
 kQuote:	.asciz	"QUOTE"
 kCond:	.asciz	"COND"
-kAtom:	.asciz	"ATOM"				# ordering matters
 kCar:	.asciz	"CAR"				# ordering matters
 kCdr:	.asciz	"CDR"				# ordering matters
 kCons:	.asciz	"CONS"				# ordering matters
-kEq:	.asciz	"EQ"				# needs to be last
+kEq:	.asciz	"EQ"				# ordering matters
+kAtom:	.asciz	"ATOM"				# needs to be last
 
 GetToken:					# GetToken():al
 	mov	%cx,%di
@@ -45,8 +50,6 @@ GetToken:					# GetToken():al
 	stosb
 	xchg	%ax,%si
 2:	call	GetChar				# exchanges dx and ax
-	cmp	$'\b',%al
-	je	4f
 	cmp	$' ',%al
 	jbe	1b
 	cmp	$')',%al
@@ -56,8 +59,6 @@ GetToken:					# GetToken():al
 3:	mov	%bh,(%di)			# bh is zero
 	xchg	%si,%ax
 	ret
-4:	dec	%di
-	jmp	2b
 
 .PrintList:
 	mov	$'(',%al
@@ -122,16 +123,30 @@ PutChar:mov	$0x0e,%ah			# prints CP-437
 	int	$0x10				# vidya service
 	pop	%bp				# scroll up bug
 	cmp	$'\r',%al			# don't clobber
-	jne	1f				# look xchg ret
+	jne	.RetDx				# look xchg ret
 	mov	$'\n',%al
 	jmp	PutChar
-1:	xchg	%dx,%ax
+.RetDx:	xchg	%dx,%ax
 	ret
 
 ////////////////////////////////////////////////////////////////////////////////
 
+Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
+	jb	.RetDi				# we assume immutable cells
+	push	(%bx,%di)			# mark prevents negative gc
+	mov	(%di),%di
+	call	Gc
+	pop	%di
+	push	%ax
+	call	Gc
+	pop	%di
+	call	Cons
+	sub	%si,%ax				# ax -= C - B
+	add	%dx,%ax
+	ret
+
 Evlis:	test	%di,%di				# Evlis(m:di,a:dx):ax
-	jz	1f				# jump if nil
+	jz	.RetDi				# jump if nil
 	push	(%bx,%di)			# save 1 Cdr(m)
 	mov	(%di),%ax
 	call	Eval
@@ -145,36 +160,27 @@ Cons:	xchg	%di,%cx				# Cons(m:di,a:ax):ax
 	mov	%cx,(%di)			# must preserve si
 	mov	%ax,(%bx,%di)
 	lea	4(%di),%cx
-1:	xchg	%di,%ax
-	ret
-
-Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
-	jb	1b				# we assume immutable cells
-	push	(%bx,%di)			# mark prevents negative gc
-	mov	(%di),%di
-	call	Gc
-	pop	%di
-	push	%ax
-	call	Gc
-	pop	%di
-	call	Cons
-	sub	%si,%ax				# ax -= C - B
-	add	%dx,%ax
+.RetDi:	xchg	%di,%ax
 	ret
 
 GetList:call	GetToken
 	cmp	$')',%al
 	je	.retF
+	cmp	$'.',%al			# FRIENDLY FEATURE
+	je	1f				# CONS DOT LITERAL
 	call	GetObject
 	push	%ax				# popped by xCons
 	call	GetList
 	jmp	xCons
+1:	call	Read
+	push	%ax
+	call	GetList
+	pop	%ax
+	ret
 
-.dflt1:	push	%si				# save x
-	call	Eval
-	pop	%si				# restore x
-#	jmp	Apply
-
+.resolv:push	%si
+	call	Eval				# do (fn si) → ((λ ...) si)
+	pop	%si
 Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
 	jns	.switch				# jump if atom
 	xchg	%ax,%di				# di = fn
@@ -194,31 +200,32 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 	xchg	%ax,%dx				# a = new list
 	pop	%di				# grab Cdr(x)
 	jmp	Pairlis
-.switch:cmp	$kEq,%ax			# eq is last builtin atom
-	ja	.dflt1				# ah is zero if not above
+.switch:cmp	$kAtom,%ax			# eq is last builtin atom
+	ja	.resolv				# ah is zero if not above
 	mov	(%si),%di			# di = Car(x)
+	je	.ifAtom
+	cmp	$kCons,%ax
+	jae	.ifCons
+	test	%di,%di				# FRIENDLY FEATURE
+	jns	.retF				# CAR/CDR(NIL)→NIL
 .ifCar:	cmp	$kCar,%al
 	je	Car
-.ifCdr:	cmp	$kCdr,%al
-	je	Cdr
-.ifAtom:cmp	$kAtom,%al
-	jne	.ifCons
-	test	%di,%di				# test if atom
-	jns	.retT
-.retF:	xor	%ax,%ax				# ax = nil
-	ret
-.ifCons:cmp	$kCons,%al
-	mov	(%bx,%si),%si			# si = Cdr(x)
+.ifCdr:	jmp	Cdr
+.ifCons:mov	(%bx,%si),%si			# si = Cdr(x)
 	lodsw					# si = Cadr(x)
 	je	Cons
 .isEq:	xor	%di,%ax				# we know for certain it's eq
 	jne	.retF
 .retT:	mov	$kT,%al
 	ret
+.ifAtom:test	%di,%di				# test if atom
+	jns	.retT
+.retF:	xor	%ax,%ax				# ax = nil
+	ret
 
 Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
-1:	test	%si,%si
-	jns	Undef
+1:	test	%si,%si				# FRIENDLY FEATURE
+	jns	Undef				# PRINT ?X IF X∉DX
 	mov	(%si),%di
 	mov	(%bx,%si),%si
 	scasw
@@ -228,7 +235,7 @@ Cadr:	mov	(%bx,%di),%di			# contents of decrement register
 	.byte	0x3C				# cmp §scasw,%al (nop next byte)
 Cdr:	scasw					# increments our data index by 2
 Car:	mov	(%di),%ax			# contents of address register!!
-2:	ret
+	ret
 
 1:	mov	(%bx,%di),%di			# di = Cdr(c)
 Evcon:	push	%di				# save c
@@ -281,8 +288,8 @@ Read:	call	GetToken
 	call	GetObject
 	ret
 
-Define:	call	Read
-	push	%ax
+Define:	call	Read				# FRIENDLY FEATURE
+	push	%ax				# DEFINE NAME SEXP
 	call	Read
 	pop	%di
 	call	Cons

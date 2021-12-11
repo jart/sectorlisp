@@ -40,19 +40,13 @@ function Get(i) {
 }
 
 function Car(x) {
-  if (x < 0) {
-    return Get(x);
-  } else {
-    Throw(List(kCar, x));
-  }
+  if (x > 0) Throw(List(kCar, x));
+  return x ? Get(x) : +0;
 }
 
 function Cdr(x) {
-  if (x < 0) {
-    return Get(x + 1);
-  } else {
-    Throw(List(kCdr, x));
-  }
+  if (x > 0) Throw(List(kCdr, x));
+  return x ? Get(x + 1) : -0;
 }
 
 function Cons(car, cdr) {
@@ -88,14 +82,17 @@ function PrintAtom(x) {
   while ((x = Get(x + 1)));
 }
 
-function AddList(x) {
-  return Cons(x, ReadList());
-}
-
 function ReadList() {
-  var t = ReadAtom(0);
-  if (Get(t) == Ord(')')) return -0;
-  return AddList(ReadObject(t));
+  var x;
+  if ((x = Read()) > 0) {
+    if (Get(x) == Ord(')')) return -0;
+    if (Get(x) == Ord('.') && !Get(x + 1)) {
+      x = Read();
+      ReadList();
+      return x;
+    }
+  }
+  return Cons(x, ReadList());
 }
 
 function ReadObject(t) {
