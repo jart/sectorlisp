@@ -26,17 +26,22 @@ exit
 #define function
 #define Null 16384
 var M[Null * 2];
+var (*funcall)();
 jmp_buf undefined;
 //`
 
-var cx, dx, lo, kT, kEq, kCar, kCdr, kCond, kAtom, kCons, kQuote, kDefine;
-
-function Set(i, x) {
-  M[Null + i] = x;
-}
+var cx, dx, depth, panic;
+var cHeap, cGets, cSets, cPrints;
+var kT, kEq, kCar, kCdr, kCond, kAtom, kCons, kQuote, kDefine;
 
 function Get(i) {
+  ++cGets;
   return M[Null + i];
+}
+
+function Set(i, x) {
+  ++cSets;
+  M[Null + i] = x;
 }
 
 function Car(x) {
@@ -52,7 +57,7 @@ function Cdr(x) {
 function Cons(car, cdr) {
   Set(--cx, cdr);
   Set(--cx, car);
-  if (cx < lo) lo = cx;
+  if (cx < cHeap) cHeap = cx;
   return cx;
 }
 
@@ -77,11 +82,6 @@ function ReadAtom(h) {
                 Hash(h, c) - Hash(0, Ord('N')));
 }
 
-function PrintAtom(x) {
-  do PrintChar(Get(x));
-  while ((x = Get(x + 1)));
-}
-
 function ReadList() {
   var x;
   if ((x = Read()) > 0) {
@@ -100,17 +100,33 @@ function ReadObject(t) {
   return ReadList();
 }
 
+function Read() {
+  return ReadObject(ReadAtom(0));
+}
+
+function PrintAtom(x) {
+  do PrintChar(Get(x));
+  while ((x = Get(x + 1)));
+}
+
 function PrintList(x) {
   PrintChar(Ord('('));
   if (x < 0) {
-    PrintObject(Car(x));
+    Print(Car(x));
     while ((x = Cdr(x))) {
+      if (panic && cPrints > panic) {
+        PrintChar(Ord(' '));
+        PrintChar(0x2026);
+        break;
+      }
       if (x < 0) {
         PrintChar(Ord(' '));
-        PrintObject(Car(x));
+        Print(Car(x));
       } else {
-        PrintChar(0x2219);
-        PrintObject(x);
+        PrintChar(Ord(' '));
+        PrintChar(Ord('.'));
+        PrintChar(Ord(' '));
+        Print(x);
         break;
       }
     }
@@ -118,7 +134,8 @@ function PrintList(x) {
   PrintChar(Ord(')'));
 }
 
-function PrintObject(x) {
+function Print(x) {
+  ++cPrints;
   if (1./x < 0) {
     PrintList(x);
   } else {
@@ -126,27 +143,18 @@ function PrintObject(x) {
   }
 }
 
-function Print(e) {
-  PrintObject(e);
-  PrintChar(Ord('\n'));
+function List(x, y) {
+  return Cons(x, Cons(y, 0));
 }
 
-function Read() {
-  return ReadObject(ReadAtom(0));
+function Define(A, x, a) {
+  return Gc(A, Cons(x, Remove(Car(x), a)));
 }
 
 function Remove(x, y) {
   if (!y) return y;
   if (x == Car(Car(y))) return Cdr(y);
   return Cons(Car(y), Remove(x, Cdr(y)));
-}
-
-function List(x, y) {
-  return Cons(x, Cons(y, 0));
-}
-
-function Define(x, y) {
-  return Cons(Cons(x, Read()), Remove(x, y));
 }
 
 function Gc(A, x) {
@@ -167,7 +175,6 @@ function Evlis(m, a) {
 }
 
 function Pairlis(x, y, a) {
-  if (!!x ^ !!y) Throw(List(x, y));
   return x ? Cons(Cons(Car(x), Car(y)),
                   Pairlis(Cdr(x), Cdr(y), a)) : a;
 }
@@ -184,7 +191,7 @@ function Evcon(c, a) {
   } else if (Cdr(c)) {
     return Evcon(Cdr(c), a);
   } else {
-    Throw(c);
+    Throw(Cons(kCond, c));
   }
 }
 
@@ -195,16 +202,61 @@ function Apply(f, x, a) {
   if (f == kAtom) return Car(x) < 0 ? 0 : kT;
   if (f == kCar)  return Car(Car(x));
   if (f == kCdr)  return Cdr(Car(x));
-  return Apply(Assoc(f, a), x, a);
+  return funcall(f, Assoc(f, a), x, a);
 }
 
 function Eval(e, a) {
-  var A = cx;
   if (!e) return e;
   if (e > 0) return Assoc(e, a);
   if (Car(e) == kQuote) return Car(Cdr(e));
-  if (Car(e) == kCond) return Gc(A, Evcon(Cdr(e), a));
-  return Gc(A, Apply(Car(e), Evlis(Cdr(e), a), a));
+  if (Car(e) == kCond) return Evcon(Cdr(e), a);
+  return Apply(Car(e), Evlis(Cdr(e), a), a);
+}
+
+function Funcall(f, l, x, a) {
+  var A = cx;
+  return Gc(A, Apply(l, x, a));
+}
+
+function Funtrace(f, l, x, a) {
+  var y, i, A = cx;
+  Indent(depth);
+  Print(f);
+  Print(x);
+  PrintChar(Ord('\n'));
+  depth += 2;
+  y = Funcall(f, l, x, a);
+  depth -= 2;
+  Indent(depth);
+  Print(f);
+  Print(x);
+  PrintChar(Ord(' '));
+  PrintChar(0x2192);
+  PrintChar(Ord(' '));
+  Print(y);
+  PrintChar(Ord('\n'));
+  return y;
+}
+
+function Indent(i) {
+  if (!i) return;
+  PrintChar(Ord(' '));
+  Indent(i - 1);
+}
+
+function Dump(a) {
+  if (!a) return;
+  Dump(Cdr(a));
+  PrintChar(Ord('('));
+  Print(kDefine);
+  PrintChar(Ord(' '));
+  Print(Car(Car(a)));
+  PrintChar(Ord(' '));
+  PrintChar(Ord('.'));
+  PrintChar(Ord(' '));
+  Print(Cdr(Car(a)));
+  PrintChar(Ord(')'));
+  PrintChar(Ord('\n'));
 }
 
 function LoadBuiltins() {
@@ -267,17 +319,24 @@ ReadChar() {
   }
 }
 
-main() {
+main(argc, argv)
+  char *argv[];
+{
   var x, a, A;
   setlocale(LC_ALL, "");
   bestlineSetXlatCallback(bestlineUppercase);
+  if (argc > 1 && argv[1][0] == '-' && argv[1][1] == 't') {
+    funcall = Funtrace;
+  } else {
+    funcall = Funcall;
+  }
   LoadBuiltins();
   for (a = 0;;) {
     A = cx;
     if (!(x = setjmp(undefined))) {
       x = Read();
-      if (x == kDefine) {
-        a = Gc(0, Define(Read(), a));
+      if (x < 0 && Car(x) == kDefine) {
+        a = Define(0, Cdr(x), a);
         SaveMachine(a);
         continue;
       }
@@ -287,6 +346,7 @@ main() {
       PrintChar('?');
     }
     Print(x);
+    PrintChar('\n');
     Gc(A, 0);
   }
 }
@@ -296,8 +356,8 @@ main() {
 ////////////////////////////////////////////////////////////////////////////////
 // JavaScript Specific Code for https://justine.lol/
 
-var a, code, index, output, M, Null;
-var eInput, eOutput, eSubmit, eReset, eLoad, ePrograms;
+var a, code, index, output, funcall, M, Null;
+var eInput, eOutput, eEval, eReset, eLoad, eTrace, ePrograms;
 
 function Throw(x) {
   throw x;
@@ -311,7 +371,10 @@ function Reset() {
   var i;
   a = 0;
   cx = 0;
-  lo = 0;
+  cHeap = 0;
+  cGets = 0;
+  cSets = 0;
+  cPrints = 0;
   Null = 16384;
   M = new Array(Null * 2);
   for (i = 0; i < M.length; ++i) {
@@ -343,8 +406,11 @@ function ReadChar() {
 
 function Lisp() {
   var x, A;
-  lo = cx;
-  output = '';
+  cGets = 0;
+  cSets = 0;
+  cHeap = cx;
+  cPrints = 0;
+  output = "";
   while (dx) {
     if (dx <= Ord(' ')) {
       ReadChar();
@@ -352,8 +418,8 @@ function Lisp() {
       A = cx;
       try {
         x = Read();
-        if (x == kDefine) {
-          a = Gc(0, Define(Read(), a));
+        if (x < 0 && Car(x) == kDefine) {
+          a = Define(0, Cdr(x), a);
           continue;
         }
         x = Eval(x, a);
@@ -362,6 +428,7 @@ function Lisp() {
         x = z;
       }
       Print(x);
+      PrintChar(Ord('\n'));
       Gc(A, 0);
     }
   }
@@ -377,19 +444,9 @@ function Load(s) {
   index = 1;
 }
 
-function OnSubmit() {
+function OnEval() {
   Load(eInput.value.toUpperCase());
   Lisp();
-}
-
-function Dump(a) {
-  if (!a) return;
-  Dump(Cdr(a));
-  output += "DEFINE ";
-  PrintObject(Car(Car(a)));
-  output += " ";
-  PrintObject(Cdr(Car(a)));
-  output += "\n";
 }
 
 function OnReset() {
@@ -404,6 +461,18 @@ function OnReset() {
   localStorage.removeItem("sectorlisp.machine");
   SaveOutput();
   ReportUsage();
+}
+
+function OnTrace() {
+  var t;
+  Load(eInput.value);
+  t = panic;
+  depth = 0;
+  panic = 10000;
+  funcall = Funtrace;
+  Lisp();
+  funcall = Funcall;
+  panic = t;
 }
 
 function OnLoad() {
@@ -431,7 +500,7 @@ function RestoreMachine() {
     M = machine[0];
     a = machine[1];
     cx = machine[2];
-    lo = cx;
+    cHeap = cx;
   }
 }
 
@@ -449,25 +518,48 @@ function Number(i) {
 function ReportUsage() {
   var i, c;
   for (c = i = 0; i < Null; i += 2) {
-    if (Get(i)) ++c;
+    if (M[Null + i]) ++c;
   }
-  document.getElementById("usage").innerText =
+  document.getElementById("ops").innerText =
+      Number(cGets) + " gets / " +
+      Number(cSets) + " sets";
+  document.getElementById("mem").innerText =
       Number((-cx >> 1) + c) + " / " +
-      Number((-lo >> 1) + c) + " / " +
+      Number((-cHeap >> 1) + c) + " / " +
       Number(Null) + " doublewords";
 }
 
+function Discount(f) {
+  return function() {
+    var x, g, h, s;
+    g = cGets;
+    s = cSets;
+    h = cHeap;
+    x = f.apply(this, arguments);
+    cHeap = h;
+    cSets = s;
+    cGets = g;
+    return x;
+  };
+}
+
 function SetUp() {
+  funcall = Funcall;
+  Read = Discount(Read);
+  Print = Discount(Print);
+  Define = Discount(Define);
   eLoad = document.getElementById("load");
   eInput = document.getElementById("input");
   eReset = document.getElementById("reset");
+  eTrace = document.getElementById("trace");
   eOutput = document.getElementById("output");
-  eSubmit = document.getElementById("submit");
+  eEval = document.getElementById("eval");
   ePrograms = document.getElementById("programs");
   window.onclick = OnWindowClick;
-  eSubmit.onclick = OnSubmit;
-  eReset.onclick = OnReset;
   eLoad.onclick = OnLoad;
+  eReset.onclick = OnReset;
+  eTrace.onclick = OnTrace;
+  eEval.onclick = OnEval;
   Reset();
   RestoreMachine();
   ReportUsage();

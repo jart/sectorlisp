@@ -34,8 +34,8 @@ kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
 start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
 	.asciz	""
 kDefine:.asciz	"DEFINE"
-kQuote:	.asciz	"QUOTE"
 kCond:	.asciz	"COND"
+kQuote:	.asciz	"QUOTE"
 kCar:	.asciz	"CAR"				# ordering matters
 kCdr:	.asciz	"CDR"				# ordering matters
 kCons:	.asciz	"CONS"				# ordering matters
@@ -123,16 +123,14 @@ PutChar:mov	$0x0e,%ah			# prints CP-437
 	int	$0x10				# vidya service
 	pop	%bp				# scroll up bug
 	cmp	$'\r',%al			# don't clobber
-	jne	.RetDx				# look xchg ret
+	jne	.retDx				# look xchg ret
 	mov	$'\n',%al
 	jmp	PutChar
-.RetDx:	xchg	%dx,%ax
-	ret
 
 ////////////////////////////////////////////////////////////////////////////////
 
 Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
-	jb	.RetDi				# we assume immutable cells
+	jb	.retDi				# we assume immutable cells
 	push	(%bx,%di)			# mark prevents negative gc
 	mov	(%di),%di
 	call	Gc
@@ -146,7 +144,7 @@ Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
 	ret
 
 Evlis:	test	%di,%di				# Evlis(m:di,a:dx):ax
-	jz	.RetDi				# jump if nil
+	jz	.retDi				# jump if nil
 	push	(%bx,%di)			# save 1 Cdr(m)
 	mov	(%di),%ax
 	call	Eval
@@ -160,7 +158,7 @@ Cons:	xchg	%di,%cx				# Cons(m:di,a:ax):ax
 	mov	%cx,(%di)			# must preserve si
 	mov	%ax,(%bx,%di)
 	lea	4(%di),%cx
-.RetDi:	xchg	%di,%ax
+.retDi:	xchg	%di,%ax
 	ret
 
 GetList:call	GetToken
@@ -178,6 +176,9 @@ GetList:call	GetToken
 	pop	%ax
 	ret
 
+.retDx:	xchg	%dx,%ax
+	ret
+
 .resolv:push	%si
 	call	Eval				# do (fn si) → ((λ ...) si)
 	pop	%si
@@ -189,11 +190,16 @@ Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
 	mov	(%di),%di			# di = Cadr(fn)
 Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 	jz	.EvCadr				# return if x is nil
+	xor	%ax,%ax				# FRIENDLY FEATURE
+	test	%si,%si				# DEFAULT NIL ARGS
+	jz	1f
 	lodsw					# ax = Car(y)
-	push	(%bx,%di)			# push Cdr(x)
+1:	push	(%bx,%di)			# push Cdr(x)
 	mov	(%di),%di			# di = Car(x)
+	test	%si,%si
+	jz	1f
 	mov	(%si),%si			# si = Cdr(y)
-	call	Cons				# Cons(Car(x),Car(y))
+1:	call	Cons				# Cons(Car(x),Car(y))
 	xchg	%ax,%di
 	xchg	%dx,%ax
 	call	Cons				# Cons(Cons(Car(x),Car(y)),a)
@@ -222,6 +228,10 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 	jns	.retT
 .retF:	xor	%ax,%ax				# ax = nil
 	ret
+
+Define:	xchg	%dx,%ax
+	call	Cons
+	jmp	.retDx
 
 Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
 1:	test	%si,%si				# FRIENDLY FEATURE
@@ -260,6 +270,7 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 	je	Car
 	cmp	$kCond,%ax
 	je	Evcon				# ABC Garbage Collector
+	jb	Define
 	push	%dx				# save a
 	push	%cx				# save A
 	push	%ax
@@ -288,17 +299,6 @@ Read:	call	GetToken
 	call	GetObject
 	ret
 
-Define:	call	Read				# FRIENDLY FEATURE
-	push	%ax				# DEFINE NAME SEXP
-	call	Read
-	pop	%di
-	call	Cons
-	xchg	%ax,%di
-	xchg	%bp,%ax
-	call	Cons
-	xchg	%ax,%bp
-	jmp	main
-
 begin:	mov	$0x8000,%sp
 	push	%cs
 	pop	%ds
@@ -311,10 +311,11 @@ begin:	mov	$0x8000,%sp
 	xor	%bp,%bp
 main:	xor	%dx,%dx
 	call	Read
-	cmp	$kDefine,%ax
-	je	Define
 	mov	%bp,%dx
 	call	Eval
+	mov	%dx,%bp
+	cmp	$kDefine,%ax
+	je	main
 Catch:	xchg	%ax,%si
 	call	PrintObject
 	mov	$'\r',%al
