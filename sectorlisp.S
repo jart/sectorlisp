@@ -186,7 +186,7 @@ Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
 	ret
 
 .resolv:push	%si
-	call	Eval				# do (fn si) → ((λ ...) si)
+	call	Assoc				# do (fn si) → ((λ ...) si)
 	pop	%si
 Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
 	jns	.switch				# jump if atom
