@@ -406,8 +406,17 @@ function ReadChar() {
   }
 }
 
+function GetMillis() {
+  if (typeof performance != "undefined") {
+    return performance.now();
+  } else {
+    return 0;
+  }
+}
+
 function Lisp() {
-  var x, A;
+  var x, A, d, t;
+  d = 0;
   cGets = 0;
   cSets = 0;
   cHeap = cx;
@@ -424,7 +433,9 @@ function Lisp() {
           a = Define(0, Cdr(x), a);
           continue;
         }
+        t = GetMillis();
         x = Eval(x, a);
+        d += GetMillis() - t;
       } catch (z) {
         PrintChar(Ord('?'));
         x = z;
@@ -437,7 +448,7 @@ function Lisp() {
   eOutput.innerText = output;
   SaveMachine(a);
   SaveOutput();
-  ReportUsage();
+  ReportUsage(d);
 }
 
 function Load(s) {
@@ -452,7 +463,9 @@ function OnEval() {
 }
 
 function OnReset() {
+  var t;
   output = "";
+  t = GetMillis();
   try {
     Dump(a);
     eOutput.innerText = output;
@@ -460,9 +473,10 @@ function OnReset() {
   } catch (e) {
     /* ignored */
   }
+  t = GetMillis() - t;
   localStorage.removeItem("sectorlisp.machine");
   SaveOutput();
-  ReportUsage();
+  ReportUsage(t);
 }
 
 function OnTrace() {
@@ -513,22 +527,27 @@ function SaveOutput() {
   }
 }
 
-function Number(i) {
+function FormatInt(i) {
   return i.toLocaleString();
 }
 
-function ReportUsage() {
-  var i, c;
+function FormatDuration(d) {
+  return d ? Math.round(d * 1000) / 1000 : 0;
+}
+
+function ReportUsage(d) {
+  var i, c, s;
   for (c = i = 0; i < Null; i += 2) {
     if (M[Null + i]) ++c;
   }
   document.getElementById("ops").innerText =
-      Number(cGets) + " gets / " +
-      Number(cSets) + " sets";
+      FormatInt(cGets) + " gets / " +
+      FormatInt(cSets) + " sets / " +
+      FormatDuration(d) + " ms";
   document.getElementById("mem").innerText =
-      Number((-cx >> 1) + c) + " / " +
-      Number((-cHeap >> 1) + c) + " / " +
-      Number(Null) + " doublewords";
+      FormatInt((-cx >> 1) + c) + " / " +
+      FormatInt((-cHeap >> 1) + c) + " / " +
+      FormatInt(Null) + " doublewords";
 }
 
 function Discount(f) {
