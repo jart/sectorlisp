@@ -239,24 +239,26 @@ function Funtrace(f, l, x, a) {
 }
 
 function Indent(i) {
-  if (!i) return;
-  PrintChar(Ord(' '));
-  Indent(i - 1);
+  if (i) {
+    PrintChar(Ord(' '));
+    Indent(i - 1);
+  }
 }
 
 function Dump(a) {
-  if (!a) return;
-  Dump(Cdr(a));
-  PrintChar(Ord('('));
-  Print(kDefine);
-  PrintChar(Ord(' '));
-  Print(Car(Car(a)));
-  PrintChar(Ord(' '));
-  PrintChar(Ord('.'));
-  PrintChar(Ord(' '));
-  Print(Cdr(Car(a)));
-  PrintChar(Ord(')'));
-  PrintChar(Ord('\n'));
+  if (a) {
+    Dump(Cdr(a));
+    PrintChar(Ord('('));
+    Print(kDefine);
+    PrintChar(Ord(' '));
+    Print(Car(Car(a)));
+    PrintChar(Ord(' '));
+    PrintChar(Ord('.'));
+    PrintChar(Ord(' '));
+    Print(Cdr(Car(a)));
+    PrintChar(Ord(')'));
+    PrintChar(Ord('\n'));
+  }
 }
 
 function LoadBuiltins() {
