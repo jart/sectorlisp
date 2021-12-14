@@ -327,10 +327,16 @@ main(argc, argv)
   var x, a, A;
   setlocale(LC_ALL, "");
   bestlineSetXlatCallback(bestlineUppercase);
-  if (argc > 1 && argv[1][0] == '-' && argv[1][1] == 't') {
-    funcall = Funtrace;
-  } else {
-    funcall = Funcall;
+  funcall = Funcall;
+  for (x = 1; x < argc; ++x) {
+    if (argv[x][0] == '-' && argv[x][1] == 't') {
+      funcall = Funtrace;
+    } else {
+      fputs("Usage: ", stderr);
+      fputs(argv[0], stderr);
+      fputs(" [-t] <input.lisp >errput.lisp\n", stderr);
+      exit(1);
+    }
   }
   LoadBuiltins();
   for (a = 0;;) {
