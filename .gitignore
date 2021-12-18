@@ -1,4 +1,5 @@
 /lisp
+/hash
 /*.o
 /*.bin
 /*.bin.dbg
