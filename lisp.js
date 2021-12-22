@@ -56,6 +56,7 @@ function Cdr(x) {
 }
 
 function Cons(car, cdr) {
+  if (cx == -Null) Throw(kCons);
   Set(--cx, cdr);
   Set(--cx, car);
   if (cx < cHeap) cHeap = cx;

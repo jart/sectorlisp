@@ -194,12 +194,10 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 	test	%si,%si				# DEFAULT NIL ARGS
 	jz	1f
 	lodsw					# ax = Car(y)
+	mov	(%si),%si			# si = Cdr(y)
 1:	push	(%bx,%di)			# push Cdr(x)
 	mov	(%di),%di			# di = Car(x)
-	test	%si,%si
-	jz	1f
-	mov	(%si),%si			# si = Cdr(y)
-1:	call	Cons				# Cons(Car(x),Car(y))
+	call	Cons				# Cons(Car(x),Car(y))
 	xchg	%ax,%di
 	xchg	%dx,%ax
 	call	Cons				# Cons(Cons(Car(x),Car(y)),a)
