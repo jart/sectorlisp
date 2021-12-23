@@ -163,33 +163,21 @@ function Gc(A, x) {
   return cx = A, x;
 }
 
-function Evcon(c, a) {
-  if (c >= 0) Throw(kCond);
-  if (Eval(Car(Car(c)), a)) {
-    return Eval(Car(Cdr(Car(c))), a);
-  } else {
-    return Evcon(Cdr(c), a);
-  }
-}
-
-function Peel(x, a) {
-  return a && x == Car(Car(a)) ? Cdr(a) : a;
-}
-
 function Copy(x, m, k) {
-  return x < m ? Cons(Copy(Car(x), m, k),
-                      Copy(Cdr(x), m, k)) + k : x;
-}
-
-function Evlis(m, a) {
-  return m ? Cons(Eval(Car(m), a),
-                  Evlis(Cdr(m), a)) : m;
-}
-
-function Pairlis(x, y, a) {
-  return x ? Cons(Cons(Car(x), Car(y)),
-                  Pairlis(Cdr(x), Cdr(y),
-                          Peel(Car(x), a))) : a;
+  var r, y, z;
+  if (x >= m) return x;
+  r = (y = Cons(Copy(Car(x), m, k), 0)) + k;
+  for (;;) {
+    if ((x = Cdr(x)) < m) {
+      z = Cons(Copy(Car(x), m, k), 0);
+      Set(y + 1, z + k);
+      y = z;
+    } else {
+      Set(y + 1, x);
+      break;
+    }
+  }
+  return r;
 }
 
 function Assoc(x, y) {
@@ -197,40 +185,70 @@ function Assoc(x, y) {
   return x == Car(Car(y)) ? Cdr(Car(y)) : Assoc(x, Cdr(y));
 }
 
-function Apply(f, x, a) {
-  if (f < 0)      return Eval(Car(Cdr(Cdr(f))), Pairlis(Car(Cdr(f)), x, a));
-  if (f == kCons) return Cons(Car(x), Car(Cdr(x)));
-  if (f == kEq)   return Car(x) == Car(Cdr(x));
-  if (f == kAtom) return Car(x) >= 0;
-  if (f == kCar)  return Car(Car(x));
-  if (f == kCdr)  return Cdr(Car(x));
-  return funcall(cx, f, Assoc(f, a), x, a);
+function Evcon(t, c, a) {
+  if (c >= 0) Throw(kCond);
+  if (Eval(Car(Car(c)), a)) {
+    return Apply(t, Car(Cdr(Car(c))), a);
+  } else {
+    return Evcon(t, Cdr(c), a);
+  }
+}
+
+function Bind(x, y, u, a) {
+  return x ? Cons(Cons(Car(x), Eval(Car(y), u)),
+                  Bind(Cdr(x), Cdr(y), u, a)) : a;
+}
+
+function Apply(t, e, a) {
+  var f, x, b, p, u, l, A;
+  if (!e) return e;
+  if (e > 0) return t ? e : Assoc(e, a);
+  f = Car(e), x = Cdr(e);
+  if (f == kCond) return Evcon(t, x, a);
+  if (t) return e;
+  if (f == kQuote) return Car(x);
+  if (f == kCons) return Cons(Eval(Car(x), a), Eval(Car(Cdr(x)), a));
+  if (f == kEq) return Eval(Car(x), a) == Eval(Car(Cdr(x)), a);
+  if (f == kAtom) return Eval(Car(x), a) >= 0;
+  if (f == kCar) return Car(Eval(Car(x), a));
+  if (f == kCdr) return Cdr(Eval(Car(x), a));
+  t = f;
+  if (f > 0) f = Assoc(f, a);
+  p = Car(Cdr(f));
+  b = Car(Cdr(Cdr(f)));
+  for (A = cx, u = a;;) {
+    u = Bind(p, x, u, a);
+    x = funcall(t, b, u);
+    if (x < 0 && Car(x) == t) {
+      x = Gc(A, Cons(u, Cdr(x)));
+      u = Car(x);
+      x = Cdr(x);
+    } else {
+      return Gc(A, Eval(x, u));
+    }
+  }
 }
 
 function Eval(e, a) {
-  if (!e) return e;
-  if (e > 0) return Assoc(e, a);
-  if (Car(e) == kQuote) return Car(Cdr(e));
-  if (Car(e) == kCond) return Evcon(Cdr(e), a);
-  return Apply(Car(e), Evlis(Cdr(e), a), a);
+  return Apply(0, e, a);
 }
 
-function Funcall(A, f, l, x, a) {
-  return Gc(A, Apply(l, x, a));
+function Funcall(t, e, a) {
+  return Apply(t, e, a);
 }
 
-function Funtrace(A, f, l, x, a) {
+function Funtrace(t, e, a) {
   var y;
   Indent(depth);
-  Print(f);
-  Print(x);
+  Print(t);
+  Print(e);
   PrintChar(Ord('\n'));
   depth += 2;
-  y = Funcall(cx, f, l, x, a);
+  y = Funcall(t, e, a);
   depth -= 2;
   Indent(depth);
-  Print(f);
-  Print(x);
+  Print(t);
+  Print(e);
   PrintChar(Ord(' '));
   PrintChar(0x2192);
   PrintChar(Ord(' '));
@@ -240,9 +258,9 @@ function Funtrace(A, f, l, x, a) {
 }
 
 function Indent(i) {
-  if (i) {
+  printf("%010d ", -cx);
+  for (; i; --i) {
     PrintChar(Ord(' '));
-    Indent(i - 1);
   }
 }
 
@@ -397,7 +415,7 @@ main(argc, argv)
         SaveAlist(a);
         continue;
       }
-      x = Eval(x, a);
+      x = Eval(x, a, 0);
     } else {
       x = ~x;
       PrintChar('?');
@@ -537,7 +555,7 @@ function Lisp() {
           a = Define(Cdr(x), a);
           continue;
         }
-        x = Eval(x, a);
+        x = Eval(x, a, 0);
       } catch (z) {
         PrintChar(Ord('?'));
         x = z;
