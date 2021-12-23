@@ -25,7 +25,7 @@ exit
 #endif
 #define var int
 #define function
-#define Null 16384
+#define Null 01000000
 var M[Null * 2];
 var (*funcall)();
 jmp_buf undefined;
@@ -68,7 +68,7 @@ function Probe(h, p) {
 }
 
 function Hash(h, x) {
-  return (((h + x) * 3083 + 3191) >> 4) & (Null / 2 - 1);
+  return ((h + x) * 60611 + 20485) & (Null / 2 - 1);
 }
 
 function Intern(x, y, h, p) {
@@ -156,6 +156,35 @@ function List(x, y) {
   return Cons(x, Cons(y, -0));
 }
 
+function Evcon(c, a, t) {
+  if (c >= 0) Throw(kCond);
+  if (Eval(Car(Car(c)), a)) {
+    return Apply(Car(Cdr(Car(c))), a, t);
+  } else {
+    return Evcon(Cdr(c), a, t);
+  }
+}
+
+function Assoc(x, y) {
+  var c, p;
+  for (c = 3; y < 0; y = M[Null + y + 1], c += 3) {
+    if (x == M[Null + M[Null + y]]) {
+      cGets += c;
+      return M[Null + M[Null + y] + 1];
+    }
+  }
+  Throw(x);
+}
+
+function Bind(x, y, u, a) {
+  while (x) {
+    a = Cons(Cons(Car(x), Arg1(y, u)), a);
+    x = Cdr(x);
+    y = Cdr(y);
+  }
+  return a;
+}
+
 function Gc(A, x) {
   var C, B = cx;
   x = Copy(x, A, A - B), C = cx;
@@ -180,45 +209,13 @@ function Copy(x, m, k) {
   return r;
 }
 
-function Assoc(x, y) {
-  if (!y) Throw(x);
-  return x == Car(Car(y)) ? Cdr(Car(y)) : Assoc(x, Cdr(y));
-}
-
-function Evcon(t, c, a) {
-  if (c >= 0) Throw(kCond);
-  if (Eval(Car(Car(c)), a)) {
-    return Apply(t, Car(Cdr(Car(c))), a);
-  } else {
-    return Evcon(t, Cdr(c), a);
-  }
-}
-
-function Bind(x, y, u, a) {
-  return x ? Cons(Cons(Car(x), Eval(Car(y), u)),
-                  Bind(Cdr(x), Cdr(y), u, a)) : a;
-}
-
-function Apply(t, e, a) {
-  var f, x, b, p, u, l, A;
-  if (!e) return e;
-  if (e > 0) return t ? e : Assoc(e, a);
-  f = Car(e), x = Cdr(e);
-  if (f == kCond) return Evcon(t, x, a);
-  if (t) return e;
-  if (f == kQuote) return Car(x);
-  if (f == kCons) return Cons(Eval(Car(x), a), Eval(Car(Cdr(x)), a));
-  if (f == kEq) return Eval(Car(x), a) == Eval(Car(Cdr(x)), a);
-  if (f == kAtom) return Eval(Car(x), a) >= 0;
-  if (f == kCar) return Car(Eval(Car(x), a));
-  if (f == kCdr) return Cdr(Eval(Car(x), a));
-  t = f;
-  if (f > 0) f = Assoc(f, a);
+function Evlam(e, a, t, f, x) {
+  var b, p, u, A;
   p = Car(Cdr(f));
   b = Car(Cdr(Cdr(f)));
   for (A = cx, u = a;;) {
     u = Bind(p, x, u, a);
-    x = funcall(t, b, u);
+    x = funcall(b, u, t, a);
     if (x < 0 && Car(x) == t) {
       x = Gc(A, Cons(u, Cdr(x)));
       u = Car(x);
@@ -229,36 +226,67 @@ function Apply(t, e, a) {
   }
 }
 
+function Apply(e, a, t) {
+  if (!e) return e;
+  if (e > 0) return t ? e : Assoc(e, a);
+  return Evfun(e, a, t, Car(e), Cdr(e));
+}
+
+function Evfun(e, a, t, f, x) {
+  if (f == kCond) return Evcon(x, a, t);
+  if (t) return e;
+  if (f == kQuote) return Car(x);
+  if (f == kCons) return Cons(Arg1(x, a), Arg2(x, a));
+  if (f == kEq) return Arg1(x, a) == Arg2(x, a);
+  if (f == kAtom) return Arg1(x, a) >= 0;
+  if (f == kCar) return Car(Arg1(x, a));
+  if (f == kCdr) return Cdr(Arg1(x, a));
+  return Evlam(e, a, f, f > 0 ? Assoc(f, a) : f, x);
+}
+
+function Arg1(x, a) {
+  return Eval(Car(x), a);
+}
+
+function Arg2(x, a) {
+  return Arg1(Cdr(x), a);
+}
+
 function Eval(e, a) {
-  return Apply(0, e, a);
+  return Apply(e, a, 0);
 }
 
-function Funcall(t, e, a) {
-  return Apply(t, e, a);
-}
-
-function Funtrace(t, e, a) {
-  var y;
-  Indent(depth);
-  Print(t);
-  Print(e);
-  PrintChar(Ord('\n'));
-  depth += 2;
-  y = Funcall(t, e, a);
-  depth -= 2;
-  Indent(depth);
-  Print(t);
-  Print(e);
-  PrintChar(Ord(' '));
-  PrintChar(0x2192);
-  PrintChar(Ord(' '));
-  Print(y);
-  PrintChar(Ord('\n'));
+function Trace(b, u, t, a) {
+  var i, y;
+  if (t > 0) {
+    Indent(depth);
+    PrintChar(Ord('('));
+    Print(t);
+    for (i = u; i != a; i = Cdr(i)) {
+      PrintChar(Ord(' '));
+      Print(Cdr(Car(i)));
+    }
+    PrintChar(Ord(')'));
+    PrintChar(Ord('\r'));
+    PrintChar(Ord('\n'));
+    depth += 2;
+  }
+  y = Apply(b, u, t);
+  if (t > 0) {
+    depth -= 2;
+    Indent(depth);
+    Print(t);
+    PrintChar(Ord(' '));
+    PrintChar(0x2192);
+    PrintChar(Ord(' '));
+    Print(y);
+    PrintChar(Ord('\r'));
+    PrintChar(Ord('\n'));
+  }
   return y;
 }
 
 function Indent(i) {
-  printf("%010d ", -cx);
   for (; i; --i) {
     PrintChar(Ord(' '));
   }
@@ -394,10 +422,10 @@ main(argc, argv)
   var x, a, A;
   setlocale(LC_ALL, "");
   bestlineSetXlatCallback(bestlineUppercase);
-  funcall = Funcall;
+  funcall = Apply;
   for (x = 1; x < argc; ++x) {
     if (argv[x][0] == '-' && argv[x][1] == 't') {
-      funcall = Funtrace;
+      funcall = Trace;
     } else {
       fputs("Usage: ", stderr);
       fputs(argv[0], stderr);
@@ -629,9 +657,9 @@ function OnTrace() {
   t = panic;
   depth = 0;
   panic = 10000;
-  funcall = Funtrace;
+  funcall = Trace;
   Lisp();
-  funcall = Funcall;
+  funcall = Apply;
   panic = t;
 }
 
@@ -754,7 +782,7 @@ function SetStorage(k, v) {
 }
 
 function SetUp() {
-  funcall = Funcall;
+  funcall = Apply;
   Read = Discount(Read);
   Print = Discount(Print);
   Define = Discount(Define);
