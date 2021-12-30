@@ -219,7 +219,7 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 .ifCons:mov	(%bx,%si),%si			# si = Cdr(x)
 	lodsw					# si = Cadr(x)
 	je	Cons
-.isEq:	xor	%ax,%di
+.isEq:	xor	%di,%ax
 	jne	.retF
 .retT:	mov	$kT,%al
 	ret
