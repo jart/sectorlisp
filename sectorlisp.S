@@ -25,7 +25,7 @@
 	.code16
 	.globl	_start
 _start:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
-	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
+	.byte	0x01				# add %al,(%bx,%di)BX,DI,AL=0
 start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
 	.asciz	""				# interned strings
 kQuote:	.asciz	"QUOTE"				# builtin for eval
