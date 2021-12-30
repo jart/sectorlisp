@@ -25,7 +25,7 @@
 	.code16
 	.globl	_start
 _start:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
-kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
+	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
 start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
 	.asciz	""				# interned strings
 kQuote:	.asciz	"QUOTE"				# builtin for eval
@@ -52,7 +52,8 @@ begin:	mov	$0x8000,%sp			# uses higher address as stack
 	mov	$2,%bx
 main:	mov	%sp,%cx
 	call	GetToken
-	call	GetObject
+kT:	call	GetObject			# $kT + 1 == $0x5400 == "T"
+						# Depends on the jump width
 	call	Eval
 	xchg	%ax,%si
 	call	PrintObject
@@ -221,7 +222,7 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 	je	Cons
 .isEq:	xor	%ax,%di
 	jne	.retF
-.retT:	mov	$kT,%al
+.retT:	mov	$kT+1,%al			# $kT is $0xe85400. $kT+1 is "T"
 	ret
 .ifAtom:test	%di,%di				# test if atom
 	jns	.retT
@@ -292,3 +293,4 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 	.type	kCdr,@object
 	.type	kCons,@object
 	.type	kEq,@object
+	.type	kT,@object
