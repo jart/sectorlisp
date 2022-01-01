@@ -233,7 +233,7 @@ Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
 	mov	(%bx,%si),%si
 	scasw
 	jne	1b
-	.byte	0xF6				# testb §i8,i16(%bp,%di) jmp Car
+	.byte	0xA9				# shifted ip;  read as test, cmp
 Cadr:	mov	(%bx,%di),%di			# contents of decrement register
 	.byte	0x3C				# cmp §scasw,%al (nop next byte)
 Cdr:	scasw					# increments our data index by 2
