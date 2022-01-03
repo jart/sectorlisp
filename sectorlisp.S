@@ -104,7 +104,7 @@ PrintObject:					# PrintObject(x:si)
 	jnz	.PrintString			# -> ret
 	ret
 
-Read:	call	GetChar
+Read:	xchg	%dx,%ax
 	call	GetToken
 GetObject:					# called just after GetToken
 	cmp	$'(',%al
