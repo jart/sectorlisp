@@ -51,13 +51,13 @@ begin:	mov	$0x8000,%sp			# uses higher address as stack
 	pop	%ss				# errata exists but don't care
 	mov	$2,%bx
 main:	mov	%sp,%cx
+	mov	$'\r',%al
+	call	PutChar				# Call first to initialize %dx
 	call	GetToken
 	call	GetObject
 	call	Eval
 	xchg	%ax,%si
 	call	PrintObject
-	mov	$'\r',%al
-	call	PutChar
 	jmp	main
 
 GetToken:					# GetToken():al, dl is g_look
