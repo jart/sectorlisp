@@ -104,8 +104,25 @@ PrintObject:					# PrintObject(x:si)
 	jnz	.PrintString			# -> ret
 	ret
 
-Read:	xchg	%dx,%ax
+Print:	mov	(%si),%si			# si = Cdr(e)
+	mov	(%si),%ax			# ax = Car(Cdr(e))
+EvalPrint:
+	call	Eval
+	push	%ax
+	push	%dx
+	xchg	%ax,%si
+	call	PrintObject
+	pop	%dx
+	pop	%ax
+	ret
+
+Read:	push	%dx
+	call	GetChar
 	call	GetToken
+	call	GetObject
+	pop	%dx
+	ret
+
 GetObject:					# called just after GetToken
 	cmp	$'(',%al
 	je	GetList
@@ -142,18 +159,6 @@ PutChar:mov	$0x0e,%ah			# prints CP-437
 	mov	$'\n',%al
 	jmp	PutChar
 .RetDx:	xchg	%dx,%ax
-	ret
-
-Print:	mov	(%si),%si			# si = Cdr(e)
-	mov	(%si),%ax			# ax = Car(Cdr(e))
-EvalPrint:
-	call	Eval
-	push	%ax
-	push	%dx
-	xchg	%ax,%si
-	call	PrintObject
-	pop	%dx
-	pop	%ax
 	ret
 
 ////////////////////////////////////////////////////////////////////////////////
