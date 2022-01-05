@@ -55,6 +55,7 @@ begin:	mov	$0x8000,%sp			# uses higher address as stack
 main:	mov	%sp,%cx
 	mov	$'\r',%al
 	call	PutChar
+	mov	%dx,%fs				# Clear input lookahead cache
 	call	Read
 	call	EvalPrint
 	jmp	main
