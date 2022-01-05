@@ -117,7 +117,7 @@ EvalPrint:
 	ret
 
 Read:	push	%dx
-	call	GetChar
+	mov	%fs,%dx				# Get cached character
 	call	GetToken
 	call	GetObject
 	pop	%dx
@@ -152,6 +152,7 @@ Intern:	push	%cx				# Intern(cx,di): ax
 
 GetChar:xor	%ax,%ax				# GetChar→al:dl
 	int	$0x16				# get keystroke
+	mov	%ax,%fs				# Used for READ
 PutChar:mov	$0x0e,%ah			# prints CP-437
 	int	$0x10				# vidya service
 	cmp	$'\r',%al			# don't clobber
