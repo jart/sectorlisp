@@ -309,6 +309,8 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 1:	.ascii	" SECTORLISP v2 "
 	.word	0xAA55
 2:	.type	.sig,@object
+	.type	kRead,@object
+	.type	kPrint,@object
 	.type	kQuote,@object
 	.type	kCond,@object
 	.type	kAtom,@object
