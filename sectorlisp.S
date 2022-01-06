@@ -109,10 +109,8 @@ PrintObject:					# PrintObject(x:si)
 Print:	test	%si,%si
 	jz	NewLine
 	mov	(%si),%si			# ax = Car(Cdr(e))
-	push	%dx
 	call	PrintObject
 	xchg	%dx,%ax
-	pop	%dx
 	ret
 
 NewLine:mov	$'\r',%al
