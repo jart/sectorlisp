@@ -118,8 +118,7 @@ NewLine:mov	$'\r',%al
 
 Read:	mov	%bp,%dx				# Get cached character
 	call	GetToken
-	call	GetObject
-	ret
+	jmp	GetObject
 
 GetObject:					# called just after GetToken
 	cmp	$'(',%al
