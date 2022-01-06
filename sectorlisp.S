@@ -54,7 +54,7 @@ begin:	mov	$0x8000,%sp			# uses higher address as stack
 	mov	$2,%bx
 main:	mov	%sp,%cx
 	call	NewLine
-	mov	%dx,%fs				# Clear input lookahead cache
+	mov	%dx,%bp				# Clear input lookahead cache
 	call	Read
 	call	Eval
 	xchg	%si,%ax
@@ -116,7 +116,7 @@ Print:	test	%si,%si
 NewLine:mov	$'\r',%al
 	jmp	PutChar
 
-Read:	mov	%fs,%dx				# Get cached character
+Read:	mov	%bp,%dx				# Get cached character
 	call	GetToken
 	call	GetObject
 	ret
@@ -150,7 +150,7 @@ Intern:	push	%cx				# Intern(cx,di): ax
 
 GetChar:xor	%ax,%ax				# GetChar→al:dl
 	int	$0x16				# get keystroke
-	mov	%ax,%fs				# Used for READ
+	mov	%ax,%bp				# Used for READ
 PutChar:mov	$0x0e,%ah			# prints CP-437
 	int	$0x10				# vidya service
 	cmp	$'\r',%al			# don't clobber
