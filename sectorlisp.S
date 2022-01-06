@@ -109,12 +109,11 @@ Print:	mov	(%si),%si			# si = Cdr(e)
 	mov	(%si),%ax			# ax = Car(Cdr(e))
 EvalPrint:
 	call	Eval
-	push	%ax
 	push	%dx
 	xchg	%ax,%si
 	call	PrintObject
+	xchg	%dx,%ax
 	pop	%dx
-	pop	%ax
 	ret
 
 Read:	push	%dx
