@@ -116,11 +116,9 @@ Print:	test	%si,%si
 NewLine:mov	$'\r',%al
 	jmp	PutChar
 
-Read:	push	%dx
-	mov	%fs,%dx				# Get cached character
+Read:	mov	%fs,%dx				# Get cached character
 	call	GetToken
 	call	GetObject
-	pop	%dx
 	ret
 
 GetObject:					# called just after GetToken
@@ -232,6 +230,8 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 	je	.ifAtom
 	cmp	$kPrint,%al
 	je	Print
+	cmp	$kRead,%al
+	je	Read
 	cmp	$kCons,%al
 	jae	.ifCons
 .ifCar:	cmp	$kCar,%al
@@ -279,8 +279,6 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 	jns	Assoc				# lookup val if atom
 	xchg	%ax,%si				# di = e
 	lodsw					# ax = Car(e)
-	cmp	$kRead,%ax
-	je	Read
 	cmp	$kQuote,%ax			# maybe CONS
 	mov	(%si),%di			# di = Cdr(e)
 	je	Car
