@@ -56,7 +56,9 @@ main:	mov	%sp,%cx
 	call	NewLine
 	mov	%dx,%fs				# Clear input lookahead cache
 	call	Read
-	call	EvalPrint
+	call	Eval
+	xchg	%si,%ax
+	call	PrintObject
 	jmp	main
 
 GetToken:					# GetToken():al, dl is g_look
@@ -104,20 +106,17 @@ PrintObject:					# PrintObject(x:si)
 	jnz	.PrintString			# -> ret
 	ret
 
-Print:	mov	(%si),%si			# si = Cdr(e)
-	test	%si,%si
-	jnz	1f
-NewLine:mov	$'\r',%al
-	jmp	PutChar
-1:	mov	(%si),%ax			# ax = Car(Cdr(e))
-EvalPrint:
-	call	Eval
+Print:	test	%si,%si
+	jz	NewLine
+	mov	(%si),%si			# ax = Car(Cdr(e))
 	push	%dx
-	xchg	%ax,%si
 	call	PrintObject
 	xchg	%dx,%ax
 	pop	%dx
 	ret
+
+NewLine:mov	$'\r',%al
+	jmp	PutChar
 
 Read:	push	%dx
 	mov	%fs,%dx				# Get cached character
@@ -233,6 +232,8 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 	ja	.resolv				# ah is zero if not above
 	mov	(%si),%di			# di = Car(x)
 	je	.ifAtom
+	cmp	$kPrint,%al
+	je	Print
 	cmp	$kCons,%al
 	jae	.ifCons
 .ifCar:	cmp	$kCar,%al
@@ -282,8 +283,6 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 	lodsw					# ax = Car(e)
 	cmp	$kRead,%ax
 	je	Read
-	cmp	$kPrint,%ax
-	je	Print
 	cmp	$kQuote,%ax			# maybe CONS
 	mov	(%si),%di			# di = Cdr(e)
 	je	Car
