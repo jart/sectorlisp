@@ -53,8 +53,7 @@ begin:	mov	$0x8000,%sp			# uses higher address as stack
 	pop	%ss				# errata exists but don't care
 	mov	$2,%bx
 main:	mov	%sp,%cx
-	mov	$'\r',%al
-	call	PutChar
+	call	NewLine
 	mov	%dx,%fs				# Clear input lookahead cache
 	call	Read
 	call	EvalPrint
@@ -106,7 +105,11 @@ PrintObject:					# PrintObject(x:si)
 	ret
 
 Print:	mov	(%si),%si			# si = Cdr(e)
-	mov	(%si),%ax			# ax = Car(Cdr(e))
+	test	%si,%si
+	jnz	1f
+NewLine:mov	$'\r',%al
+	jmp	PutChar
+1:	mov	(%si),%ax			# ax = Car(Cdr(e))
 EvalPrint:
 	call	Eval
 	push	%dx
