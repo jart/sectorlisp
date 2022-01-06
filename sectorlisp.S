@@ -108,7 +108,7 @@ PrintObject:					# PrintObject(x:si)
 
 Print:	test	%si,%si
 	jz	NewLine
-	mov	(%si),%si			# ax = Car(Cdr(e))
+	xchg	%di,%si
 	call	PrintObject
 	ret
 
