@@ -94,6 +94,10 @@ GetToken:					# GetToken():al, dl is g_look
 4:	mov	$')',%al
 	jmp	PutChar
 
+Print:	test	%si,%si
+	jz	NewLine
+	xchg	%di,%si
+	.byte	0x81				# sub ax, §call Putchar
 .PutObject:					# .PutObject(c:al,x:si)
 .PrintString:					# nul-terminated in si
 	call	PutChar				# preserves si
@@ -104,12 +108,6 @@ PrintObject:					# PrintObject(x:si)
 	lodsb
 	test	%al,%al				# test for nul terminator
 	jnz	.PrintString			# -> ret
-	ret
-
-Print:	test	%si,%si
-	jz	NewLine
-	xchg	%di,%si
-	call	PrintObject
 	ret
 
 NewLine:mov	$'\r',%al
