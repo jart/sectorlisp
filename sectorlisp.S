@@ -53,8 +53,8 @@ begin:	mov	$0x8000,%sp			# uses higher address as stack
 	pop	%ss				# errata exists but don't care
 	mov	$2,%bx
 main:	mov	%sp,%cx
-	call	NewLine
-	mov	%dx,%bp				# Clear input lookahead cache
+	mov	$'\r',%al
+	call	PutChar
 	call	Read
 	call	Eval
 	xchg	%si,%ax
@@ -94,10 +94,10 @@ GetToken:					# GetToken():al, dl is g_look
 4:	mov	$')',%al
 	jmp	PutChar
 
-Print:	test	%si,%si
-	jz	NewLine
-	xchg	%di,%si
-	.byte	0x81				# sub ax, §call Putchar
+Print:	xchg	%di,%si
+	test	%di,%di
+	jnz	PrintObject
+	mov	$'\r',%al
 .PutObject:					# .PutObject(c:al,x:si)
 .PrintString:					# nul-terminated in si
 	call	PutChar				# preserves si
@@ -109,9 +109,6 @@ PrintObject:					# PrintObject(x:si)
 	test	%al,%al				# test for nul terminator
 	jnz	.PrintString			# -> ret
 	ret
-
-NewLine:mov	$'\r',%al
-	jmp	PutChar
 
 Read:	mov	%bp,%dx				# Get cached character
 	call	GetToken
