@@ -28,10 +28,10 @@ _start:	.asciz	"NIL"				# dec %si ; dec %cx ; dec %sp
 kT:	.asciz	"T"				# add %dl,(%si) boot A:\ DL=0
 start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
 	.asciz	""				# interned strings
-kRead:	.asciz	"READ"				# builtin for eval
-kPrint:	.asciz	"PRINT"				# builtin for eval
 kQuote:	.asciz	"QUOTE"				# builtin for eval
 kCond:	.asciz	"COND"				# builtin for eval
+kRead:	.asciz	"READ"				# builtin to apply
+kPrint:	.asciz	"PRINT"				# builtin to apply
 kCar:	.asciz	"CAR"				# builtin to apply
 kCdr:	.asciz	"CDR"				# ordering matters
 kCons:	.asciz	"CONS"				# must be 3rd last
@@ -54,7 +54,7 @@ begin:	mov	$0x8000,%sp			# uses higher address as stack
 	mov	$2,%bx
 main:	mov	%sp,%cx
 	mov	$'\r',%al
-	call	PutChar
+	call	PutChar				# call first to initialize %dx
 	call	Read
 	call	Eval
 	xchg	%si,%ax
@@ -94,9 +94,9 @@ GetToken:					# GetToken():al, dl is g_look
 4:	mov	$')',%al
 	jmp	PutChar
 
-Print:	xchg	%di,%si
+Print:	xchg	%di,%si				# Print(x:si)
 	test	%di,%di
-	jnz	PrintObject
+	jnz	PrintObject			# print newline for empty args
 	mov	$'\r',%al
 .PutObject:					# .PutObject(c:al,x:si)
 .PrintString:					# nul-terminated in si
@@ -110,8 +110,10 @@ PrintObject:					# PrintObject(x:si)
 	jnz	.PrintString			# -> ret
 	ret
 
-Read:	mov	%bp,%dx				# Get cached character
+Read:	mov	%bp,%dx				# get cached character
 	call	GetToken
+#	jmp	GetObject
+
 GetObject:					# called just after GetToken
 	cmp	$'(',%al
 	je	GetList
@@ -141,7 +143,7 @@ Intern:	push	%cx				# Intern(cx,di): ax
 
 GetChar:xor	%ax,%ax				# GetChar→al:dl
 	int	$0x16				# get keystroke
-	mov	%ax,%bp				# Used for READ
+	mov	%ax,%bp				# used for READ
 PutChar:mov	$0x0e,%ah			# prints CP-437
 	int	$0x10				# vidya service
 	cmp	$'\r',%al			# don't clobber
@@ -245,7 +247,7 @@ Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
 	mov	(%bx,%si),%si
 	scasw
 	jne	1b
-	.byte	0xA9				# shifted ip;  read as test, cmp
+	.byte	0xA9				# shifted ip; reads as test, cmp
 Cadr:	mov	(%bx,%di),%di			# contents of decrement register
 	.byte	0x3C				# cmp §scasw,%al (nop next byte)
 Cdr:	scasw					# increments our data index by 2
@@ -297,10 +299,10 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 1:	.ascii	" SECTORLISP v2 "
 	.word	0xAA55
 2:	.type	.sig,@object
-	.type	kRead,@object
-	.type	kPrint,@object
 	.type	kQuote,@object
 	.type	kCond,@object
+	.type	kRead,@object
+	.type	kPrint,@object
 	.type	kAtom,@object
 	.type	kCar,@object
 	.type	kCdr,@object
