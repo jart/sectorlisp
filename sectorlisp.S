@@ -94,7 +94,8 @@ GetToken:					# GetToken():al, dl is g_look
 4:	mov	$')',%al
 	jmp	PutChar
 
-Print:	xchg	%di,%si				# Print(x:si)
+.ifPrint:
+	xchg	%di,%si				# Print(x:si)
 	test	%di,%di
 	jnz	PrintObject			# print newline for empty args
 	mov	$'\r',%al
@@ -110,8 +111,8 @@ PrintObject:					# PrintObject(x:si)
 	jnz	.PrintString			# -> ret
 	ret
 
-Read:	mov	%bp,%dx				# get cached character
-	call	GetToken
+.ifRead:mov	%bp,%dx				# get cached character
+Read:	call	GetToken
 #	jmp	GetObject
 
 GetObject:					# called just after GetToken
@@ -222,9 +223,9 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 	mov	(%si),%di			# di = Car(x)
 	je	.ifAtom
 	cmp	$kPrint,%al
-	je	Print
+	je	.ifPrint
 	cmp	$kRead,%al
-	je	Read
+	je	.ifRead
 	cmp	$kCons,%al
 	jae	.ifCons
 .ifCar:	cmp	$kCar,%al
