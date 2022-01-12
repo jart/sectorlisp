@@ -174,6 +174,27 @@ Cons:	xchg	%di,%cx				# Cons(m:di,a:ax):ax
 .RetDi:	xchg	%di,%ax
 	ret
 
+Builtin:cmp	$kAtom,%ax			# atom: last builtin atom
+	ja	.resolv				# ah is zero if not above
+	mov	(%si),%di			# di = Car(x)
+	je	.ifAtom
+	cmp	$kPrint,%al
+	je	.ifPrint
+	cmp	$kRead,%al
+	je	.ifRead
+	cmp	$kCons,%al
+	jae	.ifCons
+.ifCar:	cmp	$kCar,%al
+	je	Car
+.ifCdr:	jmp	Cdr
+.ifCons:mov	(%bx,%si),%si			# si = Cdr(x)
+	lodsw					# si = Cadr(x)
+	je	Cons
+.isEq:	xor	%di,%ax
+	jne	.retF
+.retT:	mov	$kT,%al
+	ret
+
 GetList:call	GetToken
 	cmp	$')',%al
 	je	.retF
@@ -200,7 +221,7 @@ Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
 	call	Assoc				# do (fn si) → ((λ ...) si)
 	pop	%si
 Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
-	jns	.switch				# jump if atom
+	jns	Builtin				# jump if atom
 	xchg	%ax,%di				# di = fn
 .lambda:mov	(%bx,%di),%di			# di = Cdr(fn)
 	push	%di				# for .EvCadr
@@ -218,26 +239,6 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 	xchg	%ax,%dx				# a = new list
 	pop	%di				# grab Cdr(x)
 	jmp	Pairlis
-.switch:cmp	$kAtom,%ax			# atom: last builtin atom
-	ja	.resolv				# ah is zero if not above
-	mov	(%si),%di			# di = Car(x)
-	je	.ifAtom
-	cmp	$kPrint,%al
-	je	.ifPrint
-	cmp	$kRead,%al
-	je	.ifRead
-	cmp	$kCons,%al
-	jae	.ifCons
-.ifCar:	cmp	$kCar,%al
-	je	Car
-.ifCdr:	jmp	Cdr
-.ifCons:mov	(%bx,%si),%si			# si = Cdr(x)
-	lodsw					# si = Cadr(x)
-	je	Cons
-.isEq:	xor	%di,%ax
-	jne	.retF
-.retT:	mov	$kT,%al
-	ret
 .ifAtom:test	%di,%di				# test if atom
 	jns	.retT
 .retF:	xor	%ax,%ax				# ax = nil
