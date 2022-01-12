@@ -4,6 +4,7 @@
 │ Copyright 2020 Justine Alexandra Roberts Tunney                              │
 │ Copyright 2021 Alain Greppin                                                 │
 │ Some size optimisations by Peter Ferrie                                      │
+│ Copyright 2022 Hikaru Ikuta                                                  │
 │                                                                              │
 │ Permission to use, copy, modify, and/or distribute this software for         │
 │ any purpose with or without fee is hereby granted, provided that the         │
