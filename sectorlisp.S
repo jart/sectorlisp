@@ -4,6 +4,7 @@
 │ Copyright 2020 Justine Alexandra Roberts Tunney                              │
 │ Copyright 2021 Alain Greppin                                                 │
 │ Some size optimisations by Peter Ferrie                                      │
+│ Copyright 2022 Hikaru Ikuta                                                  │
 │                                                                              │
 │ Permission to use, copy, modify, and/or distribute this software for         │
 │ any purpose with or without fee is hereby granted, provided that the         │
@@ -30,6 +31,8 @@ start:	ljmp	$0x7c00>>4,$begin		# cs = 0x7c00 is boot address
 	.asciz	""				# interned strings
 kQuote:	.asciz	"QUOTE"				# builtin for eval
 kCond:	.asciz	"COND"				# builtin for eval
+kRead:	.asciz	"READ"				# builtin to apply
+kPrint:	.asciz	"PRINT"				# builtin to apply
 kCar:	.asciz	"CAR"				# builtin to apply
 kCdr:	.asciz	"CDR"				# ordering matters
 kCons:	.asciz	"CONS"				# must be 3rd last
@@ -52,11 +55,10 @@ begin:	mov	$0x8000,%sp			# uses higher address as stack
 	mov	$2,%bx
 main:	mov	%sp,%cx
 	mov	$'\r',%al
-	call	PutChar				# Call first to initialize %dx
-	call	GetToken
-	call	GetObject
+	call	PutChar				# call first to initialize %dx
+	call	Read
 	call	Eval
-	xchg	%ax,%si
+	xchg	%si,%ax
 	call	PrintObject
 	jmp	main
 
@@ -93,6 +95,11 @@ GetToken:					# GetToken():al, dl is g_look
 4:	mov	$')',%al
 	jmp	PutChar
 
+.ifPrint:
+	xchg	%di,%si				# Print(x:si)
+	test	%di,%di
+	jnz	PrintObject			# print newline for empty args
+	mov	$'\r',%al
 .PutObject:					# .PutObject(c:al,x:si)
 .PrintString:					# nul-terminated in si
 	call	PutChar				# preserves si
@@ -104,6 +111,10 @@ PrintObject:					# PrintObject(x:si)
 	test	%al,%al				# test for nul terminator
 	jnz	.PrintString			# -> ret
 	ret
+
+.ifRead:mov	%bp,%dx				# get cached character
+Read:	call	GetToken
+#	jmp	GetObject
 
 GetObject:					# called just after GetToken
 	cmp	$'(',%al
@@ -134,6 +145,7 @@ Intern:	push	%cx				# Intern(cx,di): ax
 
 GetChar:xor	%ax,%ax				# GetChar→al:dl
 	int	$0x16				# get keystroke
+	mov	%ax,%bp				# used for READ
 PutChar:mov	$0x0e,%ah			# prints CP-437
 	int	$0x10				# vidya service
 	cmp	$'\r',%al			# don't clobber
@@ -163,6 +175,27 @@ Cons:	xchg	%di,%cx				# Cons(m:di,a:ax):ax
 .RetDi:	xchg	%di,%ax
 	ret
 
+Builtin:cmp	$kAtom,%ax			# atom: last builtin atom
+	ja	.resolv				# ah is zero if not above
+	mov	(%si),%di			# di = Car(x)
+	je	.ifAtom
+	cmp	$kPrint,%al
+	je	.ifPrint
+	cmp	$kRead,%al
+	je	.ifRead
+	cmp	$kCons,%al
+	jae	.ifCons
+.ifCar:	cmp	$kCar,%al
+	je	Car
+.ifCdr:	jmp	Cdr
+.ifCons:mov	(%bx,%si),%si			# si = Cdr(x)
+	lodsw					# si = Cadr(x)
+	je	Cons
+.isEq:	xor	%di,%ax
+	jne	.retF
+.retT:	mov	$kT,%al
+	ret
+
 GetList:call	GetToken
 	cmp	$')',%al
 	je	.retF
@@ -189,7 +222,7 @@ Gc:	cmp	%dx,%di				# Gc(x:di,A:dx,B:si):ax
 	call	Assoc				# do (fn si) → ((λ ...) si)
 	pop	%si
 Apply:	test	%ax,%ax				# Apply(fn:ax,x:si:a:dx):ax
-	jns	.switch				# jump if atom
+	jns	Builtin				# jump if atom
 	xchg	%ax,%di				# di = fn
 .lambda:mov	(%bx,%di),%di			# di = Cdr(fn)
 	push	%di				# for .EvCadr
@@ -207,22 +240,6 @@ Pairlis:test	%di,%di				# Pairlis(x:di,y:si,a:dx):dx
 	xchg	%ax,%dx				# a = new list
 	pop	%di				# grab Cdr(x)
 	jmp	Pairlis
-.switch:cmp	$kAtom,%ax			# atom: last builtin atom
-	ja	.resolv				# ah is zero if not above
-	mov	(%si),%di			# di = Car(x)
-	je	.ifAtom
-	cmp	$kCons,%al
-	jae	.ifCons
-.ifCar:	cmp	$kCar,%al
-	je	Car
-.ifCdr:	jmp	Cdr
-.ifCons:mov	(%bx,%si),%si			# si = Cdr(x)
-	lodsw					# si = Cadr(x)
-	je	Cons
-.isEq:	xor	%di,%ax
-	jne	.retF
-.retT:	mov	$kT,%al
-	ret
 .ifAtom:test	%di,%di				# test if atom
 	jns	.retT
 .retF:	xor	%ax,%ax				# ax = nil
@@ -233,7 +250,7 @@ Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
 	mov	(%bx,%si),%si
 	scasw
 	jne	1b
-	.byte	0xA9				# shifted ip;  read as test, cmp
+	.byte	0xA9				# shifted ip; reads as test, cmp
 Cadr:	mov	(%bx,%di),%di			# contents of decrement register
 	.byte	0x3C				# cmp §scasw,%al (nop next byte)
 Cdr:	scasw					# increments our data index by 2
@@ -287,6 +304,8 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 2:	.type	.sig,@object
 	.type	kQuote,@object
 	.type	kCond,@object
+	.type	kRead,@object
+	.type	kPrint,@object
 	.type	kAtom,@object
 	.type	kCar,@object
 	.type	kCdr,@object
