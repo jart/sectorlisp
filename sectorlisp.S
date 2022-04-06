@@ -183,11 +183,10 @@ Builtin:cmp	$kAtom,%ax			# atom: last builtin atom
 	je	.ifPrint
 	cmp	$kRead,%al
 	je	.ifRead
-	cmp	$kCons,%al
-	jae	.ifCons
 .ifCar:	cmp	$kCar,%al
 	je	Car
-.ifCdr:	jmp	Cdr
+	cmp	$kCons,%al
+	jb	Cdr
 .ifCons:mov	(%bx,%si),%si			# si = Cdr(x)
 	lodsw					# si = Cadr(x)
 	je	Cons
