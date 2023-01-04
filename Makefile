@@ -1,4 +1,5 @@
 CFLAGS = -w -g -O2
+LDFLAGS = -z max-page-size=512
 
 CLEANFILES =				\
 	lisp				\
@@ -30,8 +31,8 @@ bestline.o: bestline.c bestline.h
 sectorlisp.o: sectorlisp.S
 	$(AS) -g -o $@ $<
 
-sectorlisp.bin.dbg: sectorlisp.o
-	$(LD) -oformat:binary -Ttext=0x0000 -o $@ $<
+sectorlisp.bin.dbg: sectorlisp.o sectorlisp.lds
+	$(LD) $(LDFLAGS) -T sectorlisp.lds -o $@ $<
 
 sectorlisp.bin: sectorlisp.bin.dbg
 	objcopy -S -O binary sectorlisp.bin.dbg sectorlisp.bin
@@ -39,8 +40,8 @@ sectorlisp.bin: sectorlisp.bin.dbg
 brainfuck.o: brainfuck.S
 	$(AS) -g -o $@ $<
 
-brainfuck.bin.dbg: brainfuck.o
-	$(LD) -oformat:binary -Ttext=0x7c00 -o $@ $<
+brainfuck.bin.dbg: brainfuck.o brainfuck.lds
+	$(LD) $(LDFLAGS) -T brainfuck.lds -o $@ $<
 
 brainfuck.bin: brainfuck.bin.dbg
 	objcopy -S -O binary brainfuck.bin.dbg brainfuck.bin
