@@ -1,5 +1,4 @@
-CFLAGS  = -w -Os
-LDFLAGS = -s
+CFLAGS = -w -Os
 
 CLEANFILES =				\
 	lisp				\
@@ -24,8 +23,8 @@ bestline.o: bestline.c bestline.h
 sectorlisp.o: sectorlisp.S
 	$(AS) -g -o $@ $<
 
-sectorlisp.bin.dbg: sectorlisp.o
-	$(LD) -oformat:binary -Ttext=0x0000 -o $@ $<
+sectorlisp.bin.dbg: sectorlisp.o sectorlisp.lds
+	$(LD) -T sectorlisp.lds -o $@ $<
 
 sectorlisp.bin: sectorlisp.bin.dbg
 	objcopy -S -O binary sectorlisp.bin.dbg sectorlisp.bin
