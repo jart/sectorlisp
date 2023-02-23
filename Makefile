@@ -1,5 +1,4 @@
-CFLAGS = -w -g -O2
-LDFLAGS = -z max-page-size=512
+CFLAGS ?= -w -O
 
 CLEANFILES =				\
 	lisp				\
@@ -29,19 +28,19 @@ lisp.o: lisp.js bestline.h
 bestline.o: bestline.c bestline.h
 
 sectorlisp.o: sectorlisp.S
-	$(AS) -g -o $@ $<
+	$(AS) $(ASFLAGS) -o $@ $<
 
 sectorlisp.bin.dbg: sectorlisp.o sectorlisp.lds
-	$(LD) $(LDFLAGS) -T sectorlisp.lds -o $@ $<
+	$(LD) -z max-page-size=512 $(LDFLAGS) -T sectorlisp.lds -o $@ $<
 
 sectorlisp.bin: sectorlisp.bin.dbg
 	objcopy -S -O binary sectorlisp.bin.dbg sectorlisp.bin
 
 brainfuck.o: brainfuck.S
-	$(AS) -g -o $@ $<
+	$(AS) $(ASFLAGS) -o $@ $<
 
 brainfuck.bin.dbg: brainfuck.o brainfuck.lds
-	$(LD) $(LDFLAGS) -T brainfuck.lds -o $@ $<
+	$(LD) -z max-page-size=512 $(LDFLAGS) -T brainfuck.lds -o $@ $<
 
 brainfuck.bin: brainfuck.bin.dbg
 	objcopy -S -O binary brainfuck.bin.dbg brainfuck.bin
