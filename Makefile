@@ -1,4 +1,4 @@
-CFLAGS = -w -Os
+CFLAGS = -w -O
 
 CLEANFILES =				\
 	lisp				\
