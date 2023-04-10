@@ -285,9 +285,9 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 	call	Evlis
 	xchg	%ax,%si
 	pop	%ax
-	jmp	2f
+	call	Apply
 
-	.fill	0x1BE - (. - _start), 1, 0xce	# to have this boot from a USB
+	.fill	0x1BE - (. - _start), 1, 0x90	# to have this boot from a USB
 						# drive on a modern PC, make a
 						# degenerate "partition table"
 						# where this sector starts the
@@ -297,33 +297,32 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 						# starting sector LBA numbers!
 
 						# * 1st partition entry *
-	.byte	0x80				#  - bootable indicator
-	.byte	0, 1, 0				#  - h₀, s₀ (& c₀ hi bits), c₀
-	.byte	0x7F				#  - OS or filesystem indicator
-	.byte	0xFF, 0xFF, 0xFF		#  - h₉, s₉ (& c₉ hi bits), c₉
-	.long	0				#  - c₀*Cₙ + h₀*Hₙ + s₀*Sₙ
-
-2:	call	Apply
-	.byte	0x3C
-						# * 2nd partition entry *
 	.byte	0x00				#  - bootable indicator
+	.byte	0b11010010			#    reads as add %dl,%dl
 	pop	%dx				# restore A
 	mov	%cx,%si				# si = B
 	xchg	%ax,%di
 	call	Gc
 	mov	%dx,%di				# di = A
-	.byte	0x3C				#
 	.byte	0x00				#  - hi8(c₀*Cₙ + h₀*Hₙ + s₀*Sₙ)
+	.byte	0b11010010			#    reads as add %dl,%dl
 	sub	%si,%cx				# cx = C - B
-	rep movsb
-						# * 3rd partition entry *
+	.byte	0x3C				# cmp $0,%al
+						# * 2nd partition entry *
 	.byte	0x00				#  - bootable indicator
-	.byte	0xC9
+	rep movsb
 	mov	%di,%cx				# cx = A + (C - B)
 	pop	%dx				# restore a
 1:	ret
 
-	.fill	0x1DE + 0x8 - (. - _start), 1, 0xce
+	.fill	0x1CE + 0x8 - (. - _start), 1, 0xce
+	.long	0				#  - c₀*Cₙ + h₀*Hₙ + s₀*Sₙ
+
+	.fill	0x1DE - (. - _start), 1, 0xce	# * 3rd partition entry *
+	.byte	0x80				#  - bootable indicator
+	.byte	0, 1, 0				#  - h₀, s₀ (& c₀ hi bits), c₀
+	.byte	0x7F				#  - OS or filesystem indicator
+	.byte	0xFF, 0xFF, 0xFF		#  - h₉, s₉ (& c₉ hi bits), c₉
 	.long	0				#  - c₀*Cₙ + h₀*Hₙ + s₀*Sₙ
 
 	.fill	0x1EE - (. - _start), 1, 0xce	# * 4th partition entry *
