@@ -39,6 +39,12 @@ kCons:	.asciz	"CONS"				# must be 3rd last
 kEq:	.asciz	"EQ"				# must be 2nd last
 kAtom:	.asciz	"ATOM"				# needs to be last
 
+.set .partition, 1                              # set to one (1) to build with
+                                                # partition table, for maximum
+                                                # compatibility with hardware;
+                                                # else zero for build to be as
+                                                # small as possible
+
 begin:	mov	$0x8000,%sp			# uses higher address as stack
 						# and set independently of SS!
 						# 8088 doesn't stop interrupts
@@ -287,6 +293,7 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 	pop	%ax
 	call	Apply
 
+.if .partition
 	.fill	0x1BE - (. - _start), 1, 0x90	# to have this boot from a USB
 						# drive on a modern PC, make a
 						# degenerate "partition table"
@@ -299,22 +306,28 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 						# * 1st partition entry *
 	.byte	0x00				#  - bootable indicator
 	.byte	0b11010010			#    reads as add %dl,%dl
+.endif
 	pop	%dx				# restore A
 	mov	%cx,%si				# si = B
 	xchg	%ax,%di
 	call	Gc
 	mov	%dx,%di				# di = A
+.if .partition
 	.byte	0x00				#  - hi8(c₀*Cₙ + h₀*Hₙ + s₀*Sₙ)
 	.byte	0b11010010			#    reads as add %dl,%dl
+.endif
 	sub	%si,%cx				# cx = C - B
+.if .partition
 	.byte	0x3C				# cmp $0,%al
 						# * 2nd partition entry *
 	.byte	0x00				#  - bootable indicator
+.endif
 	rep movsb
 	mov	%di,%cx				# cx = A + (C - B)
 	pop	%dx				# restore a
 1:	ret
 
+.if .partition
 	.fill	0x1CE + 0x8 - (. - _start), 1, 0xce
 	.long	0				#  - c₀*Cₙ + h₀*Hₙ + s₀*Sₙ
 
@@ -327,6 +340,7 @@ Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
 
 	.fill	0x1EE - (. - _start), 1, 0xce	# * 4th partition entry *
 	.byte	0x00				#  - bootable indicator
+.endif
 .sig:	.fill	0x200 - (2f - 1f) - (. - _start), 1, 0xce
 1:	.ascii	"SECTORLISP"
 	.byte	0				#  - hi8(c₀*Cₙ + h₀*Hₙ + s₀*Sₙ)
