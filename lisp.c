@@ -21,6 +21,7 @@
 #ifndef __COSMOPOLITAN__
 #include <ctype.h>
 #include <stdio.h>
+#include <wchar.h>
 #include <stdlib.h>
 #include <string.h>
 #include <locale.h>
