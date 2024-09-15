@@ -50,6 +50,17 @@ int cx; /* stores negative memory use */
 int dx; /* stores lookahead character */
 int RAM[0100000]; /* your own ibm7090 */
 
+int AddList();
+int GetList();
+int GetObject();
+void PrintList();
+void PrintObject();
+void PrintChar();
+int Car();
+int Cdr();
+int Cons();
+int Eval();
+
 Intern() {
   int i, j, x;
   for (i = 0; (x = M[i++]);) {
