@@ -1,4 +1,4 @@
-CFLAGS = -w -O
+CFLAGS = -std=gnu89 -w -O
 
 CLEANFILES =				\
 	lisp				\
