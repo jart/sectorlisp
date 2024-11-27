@@ -18,14 +18,12 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "bestline.h"
 
-#ifndef __COSMOPOLITAN__
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <locale.h>
 #include <limits.h>
-#endif
 
 /*───────────────────────────────────────────────────────────────────────────│─╗
 │ The LISP Challenge § LISP Machine                                        ─╬─│┼

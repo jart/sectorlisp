@@ -47,7 +47,7 @@
 │   - Remove heavyweight dependencies like printf/sprintf                      │
 │   - Remove ISIG→^C→EAGAIN hack and use ephemeral handlers                    │
 │   - Support running on Windows in MinTTY or CMD.EXE on Win10+                │
-│   - Support diacratics, русский, Ελληνικά, 中国人, 日本語, 한국인            │
+│   - Support diacratics, русский, Ελληνικά, 漢字, 仮名, 한글                  │
 │                                                                              │
 │ SHORTCUTS                                                                    │
 │                                                                              │
@@ -64,6 +64,7 @@
 │   CTRL-P         PREVIOUS HISTORY                                            │
 │   CTRL-R         SEARCH HISTORY                                              │
 │   CTRL-G         CANCEL SEARCH                                               │
+│   CTRL-J         INSERT NEWLINE                                              │
 │   ALT-<          BEGINNING OF HISTORY                                        │
 │   ALT->          END OF HISTORY                                              │
 │   ALT-F          FORWARD WORD                                                │
@@ -88,6 +89,7 @@
 │   ALT-U          UPPERCASE WORD                                              │
 │   ALT-L          LOWERCASE WORD                                              │
 │   ALT-C          CAPITALIZE WORD                                             │
+│   CTRL-C CTRL-C  INTERRUPT PROCESS                                           │
 │   CTRL-Z         SUSPEND PROCESS                                             │
 │   CTRL-\         QUIT PROCESS                                                │
 │   CTRL-S         PAUSE OUTPUT                                                │
@@ -131,36 +133,32 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "bestline.h"
 
-#ifndef __COSMOPOLITAN__
-#define _POSIX_C_SOURCE  1 /* so GCC builds in ANSI mode */
-#define _XOPEN_SOURCE  700 /* so GCC builds in ANSI mode */
+#define _POSIX_C_SOURCE 1 /* so GCC builds in ANSI mode */
+#define _XOPEN_SOURCE 700 /* so GCC builds in ANSI mode */
 #define _DARWIN_C_SOURCE 1 /* so SIGWINCH / IUTF8 on XNU */
-#include <termios.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <errno.h>
-#include <string.h>
-#include <stdlib.h>
-#include <ctype.h>
-#include <sys/time.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <unistd.h>
-#include <setjmp.h>
-#include <poll.h>
 #include <assert.h>
-#include <signal.h>
+#include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <termios.h>
+#include <unistd.h>
 #ifndef SIGWINCH
 #define SIGWINCH 28 /* GNU/Systemd + XNU + FreeBSD + NetBSD + OpenBSD */
 #endif
 #ifndef IUTF8
 #define IUTF8 0
-#endif
 #endif
 
 __asm__(".ident\t\"\\n\\n\
@@ -177,23 +175,20 @@ Copyright 2010-2013 Pieter Noordhuis <pcnoordhuis@gmail.com>\"");
 #define BESTLINE_MAX_HISTORY 1024
 #endif
 
-#define BESTLINE_HISTORY_FIRST +BESTLINE_MAX_HISTORY
-#define BESTLINE_HISTORY_PREV  +1
-#define BESTLINE_HISTORY_NEXT  -1
-#define BESTLINE_HISTORY_LAST  -BESTLINE_MAX_HISTORY
+#define BESTLINE_HISTORY_PREV +1
+#define BESTLINE_HISTORY_NEXT -1
 
-#define Ctrl(C)    ((C) ^ 0100)
-#define Min(X, Y)  ((Y) > (X) ? (X) : (Y))
-#define Max(X, Y)  ((Y) < (X) ? (X) : (Y))
-#define Case(X, Y) case X: Y; break
-#define Read16le(X)        \
-  ((255 & (X)[0]) << 000 | \
-   (255 & (X)[1]) << 010)
-#define Read32le(X)                  \
-  ((unsigned)(255 & (X)[0]) << 000 | \
-   (unsigned)(255 & (X)[1]) << 010 | \
-   (unsigned)(255 & (X)[2]) << 020 | \
-   (unsigned)(255 & (X)[3]) << 030)
+#define Ctrl(C) ((C) ^ 0100)
+#define Min(X, Y) ((Y) > (X) ? (X) : (Y))
+#define Max(X, Y) ((Y) < (X) ? (X) : (Y))
+#define Case(X, Y) \
+    case X: \
+        Y; \
+        break
+#define Read16le(X) ((255 & (X)[0]) << 000 | (255 & (X)[1]) << 010)
+#define Read32le(X) \
+    ((unsigned)(255 & (X)[0]) << 000 | (unsigned)(255 & (X)[1]) << 010 | \
+     (unsigned)(255 & (X)[2]) << 020 | (unsigned)(255 & (X)[3]) << 030)
 
 struct abuf {
     char *b;
@@ -215,31 +210,35 @@ struct bestlineRing {
  * We pass this state to functions implementing specific editing
  * functionalities. */
 struct bestlineState {
-    int ifd;            /* terminal stdin file descriptor */
-    int ofd;            /* terminal stdout file descriptor */
-    struct winsize ws;  /* rows and columns in terminal */
-    char *buf;          /* edited line buffer */
+    int ifd; /* terminal stdin file descriptor */
+    int ofd; /* terminal stdout file descriptor */
+    struct winsize ws; /* rows and columns in terminal */
+    char *buf; /* edited line buffer */
     const char *prompt; /* prompt to display */
-    int hindex;         /* history index */
-    int rows;           /* rows being used */
-    int oldpos;         /* previous refresh cursor position */
-    unsigned buflen;    /* edited line buffer size */
-    unsigned pos;       /* current buffer index */
-    unsigned len;       /* current edited line length */
-    unsigned mark;      /* saved cursor position */
-    unsigned yi, yj;    /* boundaries of last yank */
-    char seq[2][16];    /* keystroke history for yanking code */
-    char final;         /* set to true on last update */
-    char dirty;         /* if an update was squashed */
+    int hindex; /* history index */
+    int rows; /* rows being used */
+    int oldpos; /* previous refresh cursor position */
+    unsigned buflen; /* edited line buffer size */
+    unsigned pos; /* current buffer index */
+    unsigned len; /* current edited line length */
+    unsigned mark; /* saved cursor position */
+    unsigned yi, yj; /* boundaries of last yank */
+    char seq[2][16]; /* keystroke history for yanking code */
+    char final; /* set to true on last update */
+    char dirty; /* if an update was squashed */
+    struct abuf full; /* used for multiline mode */
 };
 
-static const char *const kUnsupported[] = {"dumb","cons25","emacs"};
+static const char *const kUnsupported[] = {"dumb", "cons25", "emacs"};
 
 static int gotint;
 static int gotcont;
 static int gotwinch;
-static char rawmode;
+static signed char rawmode;
 static char maskmode;
+static char emacsmode;
+static char llamamode;
+static char balancemode;
 static char ispaused;
 static char iscapital;
 static unsigned historylen;
@@ -273,18 +272,13 @@ static char IsControl(unsigned c) {
 }
 
 static int GetMonospaceCharacterWidth(unsigned c) {
-    return !IsControl(c)
-            + (c >= 0x1100 &&
-               (c <= 0x115f || c == 0x2329 || c == 0x232a ||
-                (c >= 0x2e80 && c <= 0xa4cf && c != 0x303f) ||
-                (c >= 0xac00 && c <= 0xd7a3) ||
-                (c >= 0xf900 && c <= 0xfaff) ||
-                (c >= 0xfe10 && c <= 0xfe19) ||
-                (c >= 0xfe30 && c <= 0xfe6f) ||
-                (c >= 0xff00 && c <= 0xff60) ||
-                (c >= 0xffe0 && c <= 0xffe6) ||
-                (c >= 0x20000 && c <= 0x2fffd) ||
-                (c >= 0x30000 && c <= 0x3fffd)));
+    return !IsControl(c) +
+           (c >= 0x1100 && (c <= 0x115f || c == 0x2329 || c == 0x232a ||
+                            (c >= 0x2e80 && c <= 0xa4cf && c != 0x303f) ||
+                            (c >= 0xac00 && c <= 0xd7a3) || (c >= 0xf900 && c <= 0xfaff) ||
+                            (c >= 0xfe10 && c <= 0xfe19) || (c >= 0xfe30 && c <= 0xfe6f) ||
+                            (c >= 0xff00 && c <= 0xff60) || (c >= 0xffe0 && c <= 0xffe6) ||
+                            (c >= 0x20000 && c <= 0x2fffd) || (c >= 0x30000 && c <= 0x3fffd)));
 }
 
 /**
@@ -298,9 +292,7 @@ static int GetMonospaceCharacterWidth(unsigned c) {
 char bestlineIsSeparator(unsigned c) {
     int m, l, r, n;
     if (c < 0200) {
-        return !(('0' <= c && c <= '9') ||
-                 ('A' <= c && c <= 'Z') ||
-                 ('a' <= c && c <= 'z'));
+        return !(('0' <= c && c <= '9') || ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z'));
     }
     if (c <= 0xffff) {
         static const unsigned short kGlyphs[][2] = {
@@ -704,8 +696,10 @@ unsigned bestlineLowercase(unsigned c) {
             (0x01f8 <= c && c <= 0x021e) || /* 20x Ǹ..Ȟ → ǹ..ȟ Watin-B */
             (0x0222 <= c && c <= 0x0232) || /*  9x Ȣ..Ȳ → ȣ..ȳ Watin-B */
             (0x1e00 <= c && c <= 0x1eff)) { /*256x Ḁ..Ỿ → ḁ..ỿ Watin-C */
-            if (c == 0x0130) return c - 199;
-            if (c == 0x1e9e) return c;
+            if (c == 0x0130)
+                return c - 199;
+            if (c == 0x1e9e)
+                return c;
             return c + (~c & 1);
         } else if (0x01cf <= c && c <= 0x01db) {
             return c + (c & 1); /* 7x Ǐ..Ǜ → ǐ..ǜ Watin-B */
@@ -717,129 +711,129 @@ unsigned bestlineLowercase(unsigned c) {
                 unsigned short b;
                 short d;
             } kLower[] = {
-                {0x00c0, 0x00d6,   +32}, /* 23x À ..Ö  → à ..ö  Watin */
-                {0x00d8, 0x00de,   +32}, /*  7x Ø ..Þ  → ø ..þ  Watin */
-                {0x0178, 0x0178,  -121}, /*  1x Ÿ ..Ÿ  → ÿ ..ÿ  Watin-A */
-                {0x0179, 0x0179,    +1}, /*  1x Ź ..Ź  → ź ..ź  Watin-A */
-                {0x017b, 0x017b,    +1}, /*  1x Ż ..Ż  → ż ..ż  Watin-A */
-                {0x017d, 0x017d,    +1}, /*  1x Ž ..Ž  → ž ..ž  Watin-A */
-                {0x0181, 0x0181,  +210}, /*  1x Ɓ ..Ɓ  → ɓ ..ɓ  Watin-B */
-                {0x0182, 0x0182,    +1}, /*  1x Ƃ ..Ƃ  → ƃ ..ƃ  Watin-B */
-                {0x0184, 0x0184,    +1}, /*  1x Ƅ ..Ƅ  → ƅ ..ƅ  Watin-B */
-                {0x0186, 0x0186,  +206}, /*  1x Ɔ ..Ɔ  → ɔ ..ɔ  Watin-B */
-                {0x0187, 0x0187,    +1}, /*  1x Ƈ ..Ƈ  → ƈ ..ƈ  Watin-B */
-                {0x0189, 0x018a,  +205}, /*  2x Ɖ ..Ɗ  → ɖ ..ɗ  Watin-B */
-                {0x018b, 0x018b,    +1}, /*  1x Ƌ ..Ƌ  → ƌ ..ƌ  Watin-B */
-                {0x018e, 0x018e,   +79}, /*  1x Ǝ ..Ǝ  → ǝ ..ǝ  Watin-B */
-                {0x018f, 0x018f,  +202}, /*  1x Ə ..Ə  → ə ..ə  Watin-B */
-                {0x0190, 0x0190,  +203}, /*  1x Ɛ ..Ɛ  → ɛ ..ɛ  Watin-B */
-                {0x0191, 0x0191,    +1}, /*  1x Ƒ ..Ƒ  → ƒ ..ƒ  Watin-B */
-                {0x0193, 0x0193,  +205}, /*  1x Ɠ ..Ɠ  → ɠ ..ɠ  Watin-B */
-                {0x0194, 0x0194,  +207}, /*  1x Ɣ ..Ɣ  → ɣ ..ɣ  Watin-B */
-                {0x0196, 0x0196,  +211}, /*  1x Ɩ ..Ɩ  → ɩ ..ɩ  Watin-B */
-                {0x0197, 0x0197,  +209}, /*  1x Ɨ ..Ɨ  → ɨ ..ɨ  Watin-B */
-                {0x0198, 0x0198,    +1}, /*  1x Ƙ ..Ƙ  → ƙ ..ƙ  Watin-B */
-                {0x019c, 0x019c,  +211}, /*  1x Ɯ ..Ɯ  → ɯ ..ɯ  Watin-B */
-                {0x019d, 0x019d,  +213}, /*  1x Ɲ ..Ɲ  → ɲ ..ɲ  Watin-B */
-                {0x019f, 0x019f,  +214}, /*  1x Ɵ ..Ɵ  → ɵ ..ɵ  Watin-B */
-                {0x01a0, 0x01a0,    +1}, /*  1x Ơ ..Ơ  → ơ ..ơ  Watin-B */
-                {0x01a2, 0x01a2,    +1}, /*  1x Ƣ ..Ƣ  → ƣ ..ƣ  Watin-B */
-                {0x01a4, 0x01a4,    +1}, /*  1x Ƥ ..Ƥ  → ƥ ..ƥ  Watin-B */
-                {0x01a6, 0x01a6,  +218}, /*  1x Ʀ ..Ʀ  → ʀ ..ʀ  Watin-B */
-                {0x01a7, 0x01a7,    +1}, /*  1x Ƨ ..Ƨ  → ƨ ..ƨ  Watin-B */
-                {0x01a9, 0x01a9,  +218}, /*  1x Ʃ ..Ʃ  → ʃ ..ʃ  Watin-B */
-                {0x01ac, 0x01ac,    +1}, /*  1x Ƭ ..Ƭ  → ƭ ..ƭ  Watin-B */
-                {0x01ae, 0x01ae,  +218}, /*  1x Ʈ ..Ʈ  → ʈ ..ʈ  Watin-B */
-                {0x01af, 0x01af,    +1}, /*  1x Ư ..Ư  → ư ..ư  Watin-B */
-                {0x01b1, 0x01b2,  +217}, /*  2x Ʊ ..Ʋ  → ʊ ..ʋ  Watin-B */
-                {0x01b3, 0x01b3,    +1}, /*  1x Ƴ ..Ƴ  → ƴ ..ƴ  Watin-B */
-                {0x01b5, 0x01b5,    +1}, /*  1x Ƶ ..Ƶ  → ƶ ..ƶ  Watin-B */
-                {0x01b7, 0x01b7,  +219}, /*  1x Ʒ ..Ʒ  → ʒ ..ʒ  Watin-B */
-                {0x01b8, 0x01b8,    +1}, /*  1x Ƹ ..Ƹ  → ƹ ..ƹ  Watin-B */
-                {0x01bc, 0x01bc,    +1}, /*  1x Ƽ ..Ƽ  → ƽ ..ƽ  Watin-B */
-                {0x01c4, 0x01c4,    +2}, /*  1x Ǆ ..Ǆ  → ǆ ..ǆ  Watin-B */
-                {0x01c5, 0x01c5,    +1}, /*  1x ǅ ..ǅ  → ǆ ..ǆ  Watin-B */
-                {0x01c7, 0x01c7,    +2}, /*  1x Ǉ ..Ǉ  → ǉ ..ǉ  Watin-B */
-                {0x01c8, 0x01c8,    +1}, /*  1x ǈ ..ǈ  → ǉ ..ǉ  Watin-B */
-                {0x01ca, 0x01ca,    +2}, /*  1x Ǌ ..Ǌ  → ǌ ..ǌ  Watin-B */
-                {0x01cb, 0x01cb,    +1}, /*  1x ǋ ..ǋ  → ǌ ..ǌ  Watin-B */
-                {0x01cd, 0x01cd,    +1}, /*  1x Ǎ ..Ǎ  → ǎ ..ǎ  Watin-B */
-                {0x01f1, 0x01f1,    +2}, /*  1x Ǳ ..Ǳ  → ǳ ..ǳ  Watin-B */
-                {0x01f2, 0x01f2,    +1}, /*  1x ǲ ..ǲ  → ǳ ..ǳ  Watin-B */
-                {0x01f4, 0x01f4,    +1}, /*  1x Ǵ ..Ǵ  → ǵ ..ǵ  Watin-B */
-                {0x01f6, 0x01f6,   -97}, /*  1x Ƕ ..Ƕ  → ƕ ..ƕ  Watin-B */
-                {0x01f7, 0x01f7,   -56}, /*  1x Ƿ ..Ƿ  → ƿ ..ƿ  Watin-B */
-                {0x0220, 0x0220,  -130}, /*  1x Ƞ ..Ƞ  → ƞ ..ƞ  Watin-B */
-                {0x023b, 0x023b,    +1}, /*  1x Ȼ ..Ȼ  → ȼ ..ȼ  Watin-B */
-                {0x023d, 0x023d,  -163}, /*  1x Ƚ ..Ƚ  → ƚ ..ƚ  Watin-B */
-                {0x0241, 0x0241,    +1}, /*  1x Ɂ ..Ɂ  → ɂ ..ɂ  Watin-B */
-                {0x0243, 0x0243,  -195}, /*  1x Ƀ ..Ƀ  → ƀ ..ƀ  Watin-B */
-                {0x0244, 0x0244,   +69}, /*  1x Ʉ ..Ʉ  → ʉ ..ʉ  Watin-B */
-                {0x0245, 0x0245,   +71}, /*  1x Ʌ ..Ʌ  → ʌ ..ʌ  Watin-B */
-                {0x0246, 0x0246,    +1}, /*  1x Ɇ ..Ɇ  → ɇ ..ɇ  Watin-B */
-                {0x0248, 0x0248,    +1}, /*  1x Ɉ ..Ɉ  → ɉ ..ɉ  Watin-B */
-                {0x024a, 0x024a,    +1}, /*  1x Ɋ ..Ɋ  → ɋ ..ɋ  Watin-B */
-                {0x024c, 0x024c,    +1}, /*  1x Ɍ ..Ɍ  → ɍ ..ɍ  Watin-B */
-                {0x024e, 0x024e,    +1}, /*  1x Ɏ ..Ɏ  → ɏ ..ɏ  Watin-B */
-                {0x0386, 0x0386,   +38}, /*  1x Ά ..Ά  → ά ..ά  Greek */
-                {0x0388, 0x038a,   +37}, /*  3x Έ ..Ί  → έ ..ί  Greek */
-                {0x038c, 0x038c,   +64}, /*  1x Ό ..Ό  → ό ..ό  Greek */
-                {0x038e, 0x038f,   +63}, /*  2x Ύ ..Ώ  → ύ ..ώ  Greek */
-                {0x0391, 0x03a1,   +32}, /* 17x Α ..Ρ  → α ..ρ  Greek */
-                {0x03a3, 0x03ab,   +32}, /*  9x Σ ..Ϋ  → σ ..ϋ  Greek */
-                {0x03dc, 0x03dc,    +1}, /*  1x Ϝ ..Ϝ  → ϝ ..ϝ  Greek */
-                {0x03f4, 0x03f4,   -60}, /*  1x ϴ ..ϴ  → θ ..θ  Greek */
-                {0x0400, 0x040f,   +80}, /* 16x Ѐ ..Џ  → ѐ ..џ  Cyrillic */
-                {0x0410, 0x042f,   +32}, /* 32x А ..Я  → а ..я  Cyrillic */
-                {0x0460, 0x0460,    +1}, /*  1x Ѡ ..Ѡ  → ѡ ..ѡ  Cyrillic */
-                {0x0462, 0x0462,    +1}, /*  1x Ѣ ..Ѣ  → ѣ ..ѣ  Cyrillic */
-                {0x0464, 0x0464,    +1}, /*  1x Ѥ ..Ѥ  → ѥ ..ѥ  Cyrillic */
-                {0x0472, 0x0472,    +1}, /*  1x Ѳ ..Ѳ  → ѳ ..ѳ  Cyrillic */
-                {0x0490, 0x0490,    +1}, /*  1x Ґ ..Ґ  → ґ ..ґ  Cyrillic */
-                {0x0498, 0x0498,    +1}, /*  1x Ҙ ..Ҙ  → ҙ ..ҙ  Cyrillic */
-                {0x049a, 0x049a,    +1}, /*  1x Қ ..Қ  → қ ..қ  Cyrillic */
-                {0x0531, 0x0556,   +48}, /* 38x Ա ..Ֆ  → ա ..ֆ  Armenian */
+                {0x00c0, 0x00d6, +32}, /* 23x À ..Ö  → à ..ö  Watin */
+                {0x00d8, 0x00de, +32}, /*  7x Ø ..Þ  → ø ..þ  Watin */
+                {0x0178, 0x0178, -121}, /*  1x Ÿ ..Ÿ  → ÿ ..ÿ  Watin-A */
+                {0x0179, 0x0179, +1}, /*  1x Ź ..Ź  → ź ..ź  Watin-A */
+                {0x017b, 0x017b, +1}, /*  1x Ż ..Ż  → ż ..ż  Watin-A */
+                {0x017d, 0x017d, +1}, /*  1x Ž ..Ž  → ž ..ž  Watin-A */
+                {0x0181, 0x0181, +210}, /*  1x Ɓ ..Ɓ  → ɓ ..ɓ  Watin-B */
+                {0x0182, 0x0182, +1}, /*  1x Ƃ ..Ƃ  → ƃ ..ƃ  Watin-B */
+                {0x0184, 0x0184, +1}, /*  1x Ƅ ..Ƅ  → ƅ ..ƅ  Watin-B */
+                {0x0186, 0x0186, +206}, /*  1x Ɔ ..Ɔ  → ɔ ..ɔ  Watin-B */
+                {0x0187, 0x0187, +1}, /*  1x Ƈ ..Ƈ  → ƈ ..ƈ  Watin-B */
+                {0x0189, 0x018a, +205}, /*  2x Ɖ ..Ɗ  → ɖ ..ɗ  Watin-B */
+                {0x018b, 0x018b, +1}, /*  1x Ƌ ..Ƌ  → ƌ ..ƌ  Watin-B */
+                {0x018e, 0x018e, +79}, /*  1x Ǝ ..Ǝ  → ǝ ..ǝ  Watin-B */
+                {0x018f, 0x018f, +202}, /*  1x Ə ..Ə  → ə ..ə  Watin-B */
+                {0x0190, 0x0190, +203}, /*  1x Ɛ ..Ɛ  → ɛ ..ɛ  Watin-B */
+                {0x0191, 0x0191, +1}, /*  1x Ƒ ..Ƒ  → ƒ ..ƒ  Watin-B */
+                {0x0193, 0x0193, +205}, /*  1x Ɠ ..Ɠ  → ɠ ..ɠ  Watin-B */
+                {0x0194, 0x0194, +207}, /*  1x Ɣ ..Ɣ  → ɣ ..ɣ  Watin-B */
+                {0x0196, 0x0196, +211}, /*  1x Ɩ ..Ɩ  → ɩ ..ɩ  Watin-B */
+                {0x0197, 0x0197, +209}, /*  1x Ɨ ..Ɨ  → ɨ ..ɨ  Watin-B */
+                {0x0198, 0x0198, +1}, /*  1x Ƙ ..Ƙ  → ƙ ..ƙ  Watin-B */
+                {0x019c, 0x019c, +211}, /*  1x Ɯ ..Ɯ  → ɯ ..ɯ  Watin-B */
+                {0x019d, 0x019d, +213}, /*  1x Ɲ ..Ɲ  → ɲ ..ɲ  Watin-B */
+                {0x019f, 0x019f, +214}, /*  1x Ɵ ..Ɵ  → ɵ ..ɵ  Watin-B */
+                {0x01a0, 0x01a0, +1}, /*  1x Ơ ..Ơ  → ơ ..ơ  Watin-B */
+                {0x01a2, 0x01a2, +1}, /*  1x Ƣ ..Ƣ  → ƣ ..ƣ  Watin-B */
+                {0x01a4, 0x01a4, +1}, /*  1x Ƥ ..Ƥ  → ƥ ..ƥ  Watin-B */
+                {0x01a6, 0x01a6, +218}, /*  1x Ʀ ..Ʀ  → ʀ ..ʀ  Watin-B */
+                {0x01a7, 0x01a7, +1}, /*  1x Ƨ ..Ƨ  → ƨ ..ƨ  Watin-B */
+                {0x01a9, 0x01a9, +218}, /*  1x Ʃ ..Ʃ  → ʃ ..ʃ  Watin-B */
+                {0x01ac, 0x01ac, +1}, /*  1x Ƭ ..Ƭ  → ƭ ..ƭ  Watin-B */
+                {0x01ae, 0x01ae, +218}, /*  1x Ʈ ..Ʈ  → ʈ ..ʈ  Watin-B */
+                {0x01af, 0x01af, +1}, /*  1x Ư ..Ư  → ư ..ư  Watin-B */
+                {0x01b1, 0x01b2, +217}, /*  2x Ʊ ..Ʋ  → ʊ ..ʋ  Watin-B */
+                {0x01b3, 0x01b3, +1}, /*  1x Ƴ ..Ƴ  → ƴ ..ƴ  Watin-B */
+                {0x01b5, 0x01b5, +1}, /*  1x Ƶ ..Ƶ  → ƶ ..ƶ  Watin-B */
+                {0x01b7, 0x01b7, +219}, /*  1x Ʒ ..Ʒ  → ʒ ..ʒ  Watin-B */
+                {0x01b8, 0x01b8, +1}, /*  1x Ƹ ..Ƹ  → ƹ ..ƹ  Watin-B */
+                {0x01bc, 0x01bc, +1}, /*  1x Ƽ ..Ƽ  → ƽ ..ƽ  Watin-B */
+                {0x01c4, 0x01c4, +2}, /*  1x Ǆ ..Ǆ  → ǆ ..ǆ  Watin-B */
+                {0x01c5, 0x01c5, +1}, /*  1x ǅ ..ǅ  → ǆ ..ǆ  Watin-B */
+                {0x01c7, 0x01c7, +2}, /*  1x Ǉ ..Ǉ  → ǉ ..ǉ  Watin-B */
+                {0x01c8, 0x01c8, +1}, /*  1x ǈ ..ǈ  → ǉ ..ǉ  Watin-B */
+                {0x01ca, 0x01ca, +2}, /*  1x Ǌ ..Ǌ  → ǌ ..ǌ  Watin-B */
+                {0x01cb, 0x01cb, +1}, /*  1x ǋ ..ǋ  → ǌ ..ǌ  Watin-B */
+                {0x01cd, 0x01cd, +1}, /*  1x Ǎ ..Ǎ  → ǎ ..ǎ  Watin-B */
+                {0x01f1, 0x01f1, +2}, /*  1x Ǳ ..Ǳ  → ǳ ..ǳ  Watin-B */
+                {0x01f2, 0x01f2, +1}, /*  1x ǲ ..ǲ  → ǳ ..ǳ  Watin-B */
+                {0x01f4, 0x01f4, +1}, /*  1x Ǵ ..Ǵ  → ǵ ..ǵ  Watin-B */
+                {0x01f6, 0x01f6, -97}, /*  1x Ƕ ..Ƕ  → ƕ ..ƕ  Watin-B */
+                {0x01f7, 0x01f7, -56}, /*  1x Ƿ ..Ƿ  → ƿ ..ƿ  Watin-B */
+                {0x0220, 0x0220, -130}, /*  1x Ƞ ..Ƞ  → ƞ ..ƞ  Watin-B */
+                {0x023b, 0x023b, +1}, /*  1x Ȼ ..Ȼ  → ȼ ..ȼ  Watin-B */
+                {0x023d, 0x023d, -163}, /*  1x Ƚ ..Ƚ  → ƚ ..ƚ  Watin-B */
+                {0x0241, 0x0241, +1}, /*  1x Ɂ ..Ɂ  → ɂ ..ɂ  Watin-B */
+                {0x0243, 0x0243, -195}, /*  1x Ƀ ..Ƀ  → ƀ ..ƀ  Watin-B */
+                {0x0244, 0x0244, +69}, /*  1x Ʉ ..Ʉ  → ʉ ..ʉ  Watin-B */
+                {0x0245, 0x0245, +71}, /*  1x Ʌ ..Ʌ  → ʌ ..ʌ  Watin-B */
+                {0x0246, 0x0246, +1}, /*  1x Ɇ ..Ɇ  → ɇ ..ɇ  Watin-B */
+                {0x0248, 0x0248, +1}, /*  1x Ɉ ..Ɉ  → ɉ ..ɉ  Watin-B */
+                {0x024a, 0x024a, +1}, /*  1x Ɋ ..Ɋ  → ɋ ..ɋ  Watin-B */
+                {0x024c, 0x024c, +1}, /*  1x Ɍ ..Ɍ  → ɍ ..ɍ  Watin-B */
+                {0x024e, 0x024e, +1}, /*  1x Ɏ ..Ɏ  → ɏ ..ɏ  Watin-B */
+                {0x0386, 0x0386, +38}, /*  1x Ά ..Ά  → ά ..ά  Greek */
+                {0x0388, 0x038a, +37}, /*  3x Έ ..Ί  → έ ..ί  Greek */
+                {0x038c, 0x038c, +64}, /*  1x Ό ..Ό  → ό ..ό  Greek */
+                {0x038e, 0x038f, +63}, /*  2x Ύ ..Ώ  → ύ ..ώ  Greek */
+                {0x0391, 0x03a1, +32}, /* 17x Α ..Ρ  → α ..ρ  Greek */
+                {0x03a3, 0x03ab, +32}, /*  9x Σ ..Ϋ  → σ ..ϋ  Greek */
+                {0x03dc, 0x03dc, +1}, /*  1x Ϝ ..Ϝ  → ϝ ..ϝ  Greek */
+                {0x03f4, 0x03f4, -60}, /*  1x ϴ ..ϴ  → θ ..θ  Greek */
+                {0x0400, 0x040f, +80}, /* 16x Ѐ ..Џ  → ѐ ..џ  Cyrillic */
+                {0x0410, 0x042f, +32}, /* 32x А ..Я  → а ..я  Cyrillic */
+                {0x0460, 0x0460, +1}, /*  1x Ѡ ..Ѡ  → ѡ ..ѡ  Cyrillic */
+                {0x0462, 0x0462, +1}, /*  1x Ѣ ..Ѣ  → ѣ ..ѣ  Cyrillic */
+                {0x0464, 0x0464, +1}, /*  1x Ѥ ..Ѥ  → ѥ ..ѥ  Cyrillic */
+                {0x0472, 0x0472, +1}, /*  1x Ѳ ..Ѳ  → ѳ ..ѳ  Cyrillic */
+                {0x0490, 0x0490, +1}, /*  1x Ґ ..Ґ  → ґ ..ґ  Cyrillic */
+                {0x0498, 0x0498, +1}, /*  1x Ҙ ..Ҙ  → ҙ ..ҙ  Cyrillic */
+                {0x049a, 0x049a, +1}, /*  1x Қ ..Қ  → қ ..қ  Cyrillic */
+                {0x0531, 0x0556, +48}, /* 38x Ա ..Ֆ  → ա ..ֆ  Armenian */
                 {0x10a0, 0x10c5, +7264}, /* 38x Ⴀ ..Ⴥ  → ⴀ ..ⴥ  Georgian */
                 {0x10c7, 0x10c7, +7264}, /*  1x Ⴧ ..Ⴧ  → ⴧ ..ⴧ  Georgian */
                 {0x10cd, 0x10cd, +7264}, /*  1x Ⴭ ..Ⴭ  → ⴭ ..ⴭ  Georgian */
-                {0x13f0, 0x13f5,    +8}, /*  6x Ᏸ ..Ᏽ  → ᏸ ..ᏽ  Cherokee */
+                {0x13f0, 0x13f5, +8}, /*  6x Ᏸ ..Ᏽ  → ᏸ ..ᏽ  Cherokee */
                 {0x1c90, 0x1cba, -3008}, /* 43x Ა ..Ჺ  → ა ..ჺ  Georgian2 */
                 {0x1cbd, 0x1cbf, -3008}, /*  3x Ჽ ..Ჿ  → ჽ ..ჿ  Georgian2 */
-                {0x1f08, 0x1f0f,    -8}, /*  8x Ἀ ..Ἇ  → ἀ ..ἇ  Greek2 */
-                {0x1f18, 0x1f1d,    -8}, /*  6x Ἐ ..Ἕ  → ἐ ..ἕ  Greek2 */
-                {0x1f28, 0x1f2f,    -8}, /*  8x Ἠ ..Ἧ  → ἠ ..ἧ  Greek2 */
-                {0x1f38, 0x1f3f,    -8}, /*  8x Ἰ ..Ἷ  → ἰ ..ἷ  Greek2 */
-                {0x1f48, 0x1f4d,    -8}, /*  6x Ὀ ..Ὅ  → ὀ ..ὅ  Greek2 */
-                {0x1f59, 0x1f59,    -8}, /*  1x Ὑ ..Ὑ  → ὑ ..ὑ  Greek2 */
-                {0x1f5b, 0x1f5b,    -8}, /*  1x Ὓ ..Ὓ  → ὓ ..ὓ  Greek2 */
-                {0x1f5d, 0x1f5d,    -8}, /*  1x Ὕ ..Ὕ  → ὕ ..ὕ  Greek2 */
-                {0x1f5f, 0x1f5f,    -8}, /*  1x Ὗ ..Ὗ  → ὗ ..ὗ  Greek2 */
-                {0x1f68, 0x1f6f,    -8}, /*  8x Ὠ ..Ὧ  → ὠ ..ὧ  Greek2 */
-                {0x1f88, 0x1f8f,    -8}, /*  8x ᾈ ..ᾏ  → ᾀ ..ᾇ  Greek2 */
-                {0x1f98, 0x1f9f,    -8}, /*  8x ᾘ ..ᾟ  → ᾐ ..ᾗ  Greek2 */
-                {0x1fa8, 0x1faf,    -8}, /*  8x ᾨ ..ᾯ  → ᾠ ..ᾧ  Greek2 */
-                {0x1fb8, 0x1fb9,    -8}, /*  2x Ᾰ ..Ᾱ  → ᾰ ..ᾱ  Greek2 */
-                {0x1fba, 0x1fbb,   -74}, /*  2x Ὰ ..Ά  → ὰ ..ά  Greek2 */
-                {0x1fbc, 0x1fbc,    -9}, /*  1x ᾼ ..ᾼ  → ᾳ ..ᾳ  Greek2 */
-                {0x1fc8, 0x1fcb,   -86}, /*  4x Ὲ ..Ή  → ὲ ..ή  Greek2 */
-                {0x1fcc, 0x1fcc,    -9}, /*  1x ῌ ..ῌ  → ῃ ..ῃ  Greek2 */
-                {0x1fd8, 0x1fd9,    -8}, /*  2x Ῐ ..Ῑ  → ῐ ..ῑ  Greek2 */
-                {0x1fda, 0x1fdb,  -100}, /*  2x Ὶ ..Ί  → ὶ ..ί  Greek2 */
-                {0x1fe8, 0x1fe9,    -8}, /*  2x Ῠ ..Ῡ  → ῠ ..ῡ  Greek2 */
-                {0x1fea, 0x1feb,  -112}, /*  2x Ὺ ..Ύ  → ὺ ..ύ  Greek2 */
-                {0x1fec, 0x1fec,    -7}, /*  1x Ῥ ..Ῥ  → ῥ ..ῥ  Greek2 */
-                {0x1ff8, 0x1ff9,  -128}, /*  2x Ὸ ..Ό  → ὸ ..ό  Greek2 */
-                {0x1ffa, 0x1ffb,  -126}, /*  2x Ὼ ..Ώ  → ὼ ..ώ  Greek2 */
-                {0x1ffc, 0x1ffc,    -9}, /*  1x ῼ ..ῼ  → ῳ ..ῳ  Greek2 */
+                {0x1f08, 0x1f0f, -8}, /*  8x Ἀ ..Ἇ  → ἀ ..ἇ  Greek2 */
+                {0x1f18, 0x1f1d, -8}, /*  6x Ἐ ..Ἕ  → ἐ ..ἕ  Greek2 */
+                {0x1f28, 0x1f2f, -8}, /*  8x Ἠ ..Ἧ  → ἠ ..ἧ  Greek2 */
+                {0x1f38, 0x1f3f, -8}, /*  8x Ἰ ..Ἷ  → ἰ ..ἷ  Greek2 */
+                {0x1f48, 0x1f4d, -8}, /*  6x Ὀ ..Ὅ  → ὀ ..ὅ  Greek2 */
+                {0x1f59, 0x1f59, -8}, /*  1x Ὑ ..Ὑ  → ὑ ..ὑ  Greek2 */
+                {0x1f5b, 0x1f5b, -8}, /*  1x Ὓ ..Ὓ  → ὓ ..ὓ  Greek2 */
+                {0x1f5d, 0x1f5d, -8}, /*  1x Ὕ ..Ὕ  → ὕ ..ὕ  Greek2 */
+                {0x1f5f, 0x1f5f, -8}, /*  1x Ὗ ..Ὗ  → ὗ ..ὗ  Greek2 */
+                {0x1f68, 0x1f6f, -8}, /*  8x Ὠ ..Ὧ  → ὠ ..ὧ  Greek2 */
+                {0x1f88, 0x1f8f, -8}, /*  8x ᾈ ..ᾏ  → ᾀ ..ᾇ  Greek2 */
+                {0x1f98, 0x1f9f, -8}, /*  8x ᾘ ..ᾟ  → ᾐ ..ᾗ  Greek2 */
+                {0x1fa8, 0x1faf, -8}, /*  8x ᾨ ..ᾯ  → ᾠ ..ᾧ  Greek2 */
+                {0x1fb8, 0x1fb9, -8}, /*  2x Ᾰ ..Ᾱ  → ᾰ ..ᾱ  Greek2 */
+                {0x1fba, 0x1fbb, -74}, /*  2x Ὰ ..Ά  → ὰ ..ά  Greek2 */
+                {0x1fbc, 0x1fbc, -9}, /*  1x ᾼ ..ᾼ  → ᾳ ..ᾳ  Greek2 */
+                {0x1fc8, 0x1fcb, -86}, /*  4x Ὲ ..Ή  → ὲ ..ή  Greek2 */
+                {0x1fcc, 0x1fcc, -9}, /*  1x ῌ ..ῌ  → ῃ ..ῃ  Greek2 */
+                {0x1fd8, 0x1fd9, -8}, /*  2x Ῐ ..Ῑ  → ῐ ..ῑ  Greek2 */
+                {0x1fda, 0x1fdb, -100}, /*  2x Ὶ ..Ί  → ὶ ..ί  Greek2 */
+                {0x1fe8, 0x1fe9, -8}, /*  2x Ῠ ..Ῡ  → ῠ ..ῡ  Greek2 */
+                {0x1fea, 0x1feb, -112}, /*  2x Ὺ ..Ύ  → ὺ ..ύ  Greek2 */
+                {0x1fec, 0x1fec, -7}, /*  1x Ῥ ..Ῥ  → ῥ ..ῥ  Greek2 */
+                {0x1ff8, 0x1ff9, -128}, /*  2x Ὸ ..Ό  → ὸ ..ό  Greek2 */
+                {0x1ffa, 0x1ffb, -126}, /*  2x Ὼ ..Ώ  → ὼ ..ώ  Greek2 */
+                {0x1ffc, 0x1ffc, -9}, /*  1x ῼ ..ῼ  → ῳ ..ῳ  Greek2 */
                 {0x2126, 0x2126, -7517}, /*  1x Ω ..Ω  → ω ..ω  Letterlike */
                 {0x212a, 0x212a, -8383}, /*  1x K ..K  → k ..k  Letterlike */
                 {0x212b, 0x212b, -8262}, /*  1x Å ..Å  → å ..å  Letterlike */
-                {0x2132, 0x2132,   +28}, /*  1x Ⅎ ..Ⅎ  → ⅎ ..ⅎ  Letterlike */
-                {0x2160, 0x216f,   +16}, /* 16x Ⅰ ..Ⅿ  → ⅰ ..ⅿ  Numbery */
-                {0x2183, 0x2183,    +1}, /*  1x Ↄ ..Ↄ  → ↄ ..ↄ  Numbery */
-                {0x24b6, 0x24cf,   +26}, /* 26x Ⓐ ..Ⓩ  → ⓐ ..ⓩ  Enclosed */
-                {0x2c00, 0x2c2e,   +48}, /* 47x Ⰰ ..Ⱞ  → ⰰ ..ⱞ  Glagolitic */
-                {0xff21, 0xff3a,   +32}, /* 26x Ａ..Ｚ → ａ..ｚ Dubs */
+                {0x2132, 0x2132, +28}, /*  1x Ⅎ ..Ⅎ  → ⅎ ..ⅎ  Letterlike */
+                {0x2160, 0x216f, +16}, /* 16x Ⅰ ..Ⅿ  → ⅰ ..ⅿ  Numbery */
+                {0x2183, 0x2183, +1}, /*  1x Ↄ ..Ↄ  → ↄ ..ↄ  Numbery */
+                {0x24b6, 0x24cf, +26}, /* 26x Ⓐ ..Ⓩ  → ⓐ ..ⓩ  Enclosed */
+                {0x2c00, 0x2c2e, +48}, /* 47x Ⰰ ..Ⱞ  → ⰰ ..ⱞ  Glagolitic */
+                {0xff21, 0xff3a, +32}, /* 26x Ａ..Ｚ → ａ..ｚ Dubs */
             };
             l = 0;
             r = n = sizeof(kLower) / sizeof(kLower[0]);
@@ -863,25 +857,25 @@ unsigned bestlineLowercase(unsigned c) {
             unsigned b;
             short d;
         } kAstralLower[] = {
-            {0x10400, 0x10427,   +40}, /* 40x 𐐀 ..𐐧  → 𐐨 ..𐑏  Deseret */
-            {0x104b0, 0x104d3,   +40}, /* 36x 𐒰 ..𐓓  → 𐓘 ..𐓻  Osage */
-            {0x1d400, 0x1d419,   +26}, /* 26x 𝐀 ..𝐙  → 𝐚 ..𝐳  Math */
-            {0x1d43c, 0x1d44d,   +26}, /* 18x 𝐼 ..𝑍  → 𝑖 ..𝑧  Math */
-            {0x1d468, 0x1d481,   +26}, /* 26x 𝑨 ..𝒁  → 𝒂 ..𝒛  Math */
-            {0x1d4ae, 0x1d4b5,   +26}, /*  8x 𝒮 ..𝒵  → 𝓈 ..𝓏  Math */
-            {0x1d4d0, 0x1d4e9,   +26}, /* 26x 𝓐 ..𝓩  → 𝓪 ..𝔃  Math */
-            {0x1d50d, 0x1d514,   +26}, /*  8x 𝔍 ..𝔔  → 𝔧 ..𝔮  Math */
-            {0x1d56c, 0x1d585,   +26}, /* 26x 𝕬 ..𝖅  → 𝖆 ..𝖟  Math */
-            {0x1d5a0, 0x1d5b9,   +26}, /* 26x 𝖠 ..𝖹  → 𝖺 ..𝗓  Math */
-            {0x1d5d4, 0x1d5ed,   +26}, /* 26x 𝗔 ..𝗭  → 𝗮 ..𝘇  Math */
-            {0x1d608, 0x1d621,   +26}, /* 26x 𝘈 ..𝘡  → 𝘢 ..𝘻  Math */
-            {0x1d63c, 0x1d655,  -442}, /* 26x 𝘼 ..𝙕  → 𝒂 ..𝒛  Math */
-            {0x1d670, 0x1d689,   +26}, /* 26x 𝙰 ..𝚉  → 𝚊 ..𝚣  Math */
-            {0x1d6a8, 0x1d6b8,   +26}, /* 17x 𝚨 ..𝚸  → 𝛂 ..𝛒  Math */
-            {0x1d6e2, 0x1d6f2,   +26}, /* 17x 𝛢 ..𝛲  → 𝛼 ..𝜌  Math */
-            {0x1d71c, 0x1d72c,   +26}, /* 17x 𝜜 ..𝜬  → 𝜶 ..𝝆  Math */
-            {0x1d756, 0x1d766,   +26}, /* 17x 𝝖 ..𝝦  → 𝝰 ..𝞀  Math */
-            {0x1d790, 0x1d7a0,   -90}, /* 17x 𝞐 ..𝞠  → 𝜶 ..𝝆  Math */
+            {0x10400, 0x10427, +40}, /* 40x 𐐀 ..𐐧  → 𐐨 ..𐑏  Deseret */
+            {0x104b0, 0x104d3, +40}, /* 36x 𐒰 ..𐓓  → 𐓘 ..𐓻  Osage */
+            {0x1d400, 0x1d419, +26}, /* 26x 𝐀 ..𝐙  → 𝐚 ..𝐳  Math */
+            {0x1d43c, 0x1d44d, +26}, /* 18x 𝐼 ..𝑍  → 𝑖 ..𝑧  Math */
+            {0x1d468, 0x1d481, +26}, /* 26x 𝑨 ..𝒁  → 𝒂 ..𝒛  Math */
+            {0x1d4ae, 0x1d4b5, +26}, /*  8x 𝒮 ..𝒵  → 𝓈 ..𝓏  Math */
+            {0x1d4d0, 0x1d4e9, +26}, /* 26x 𝓐 ..𝓩  → 𝓪 ..𝔃  Math */
+            {0x1d50d, 0x1d514, +26}, /*  8x 𝔍 ..𝔔  → 𝔧 ..𝔮  Math */
+            {0x1d56c, 0x1d585, +26}, /* 26x 𝕬 ..𝖅  → 𝖆 ..𝖟  Math */
+            {0x1d5a0, 0x1d5b9, +26}, /* 26x 𝖠 ..𝖹  → 𝖺 ..𝗓  Math */
+            {0x1d5d4, 0x1d5ed, +26}, /* 26x 𝗔 ..𝗭  → 𝗮 ..𝘇  Math */
+            {0x1d608, 0x1d621, +26}, /* 26x 𝘈 ..𝘡  → 𝘢 ..𝘻  Math */
+            {0x1d63c, 0x1d655, -442}, /* 26x 𝘼 ..𝙕  → 𝒂 ..𝒛  Math */
+            {0x1d670, 0x1d689, +26}, /* 26x 𝙰 ..𝚉  → 𝚊 ..𝚣  Math */
+            {0x1d6a8, 0x1d6b8, +26}, /* 17x 𝚨 ..𝚸  → 𝛂 ..𝛒  Math */
+            {0x1d6e2, 0x1d6f2, +26}, /* 17x 𝛢 ..𝛲  → 𝛼 ..𝜌  Math */
+            {0x1d71c, 0x1d72c, +26}, /* 17x 𝜜 ..𝜬  → 𝜶 ..𝝆  Math */
+            {0x1d756, 0x1d766, +26}, /* 17x 𝝖 ..𝝦  → 𝝰 ..𝞀  Math */
+            {0x1d790, 0x1d7a0, -90}, /* 17x 𝞐 ..𝞠  → 𝜶 ..𝝆  Math */
         };
         l = 0;
         r = n = sizeof(kAstralLower) / sizeof(kAstralLower[0]);
@@ -915,8 +909,10 @@ unsigned bestlineUppercase(unsigned c) {
             (0x01f8 <= c && c <= 0x021e) || /* 20x ǹ..ȟ → Ǹ..Ȟ Watin-B */
             (0x0222 <= c && c <= 0x0232) || /*  9x ȣ..ȳ → Ȣ..Ȳ Watin-B */
             (0x1e01 <= c && c <= 0x1eff)) { /*256x ḁ..ỿ → Ḁ..Ỿ Watin-C */
-            if (c == 0x0131) return c + 232;
-            if (c == 0x1e9e) return c;
+            if (c == 0x0131)
+                return c + 232;
+            if (c == 0x1e9e)
+                return c;
             return c - (c & 1);
         } else if (0x01d0 <= c && c <= 0x01dc) {
             return c - (~c & 1); /* 7x ǐ..ǜ → Ǐ..Ǜ Watin-B */
@@ -928,92 +924,92 @@ unsigned bestlineUppercase(unsigned c) {
                 unsigned short b;
                 short d;
             } kUpper[] = {
-                {0x00b5, 0x00b5,  +743}, /*  1x µ ..µ  → Μ ..Μ  Watin */
-                {0x00e0, 0x00f6,   -32}, /* 23x à ..ö  → À ..Ö  Watin */
-                {0x00f8, 0x00fe,   -32}, /*  7x ø ..þ  → Ø ..Þ  Watin */
-                {0x00ff, 0x00ff,  +121}, /*  1x ÿ ..ÿ  → Ÿ ..Ÿ  Watin */
-                {0x017a, 0x017a,    -1}, /*  1x ź ..ź  → Ź ..Ź  Watin-A */
-                {0x017c, 0x017c,    -1}, /*  1x ż ..ż  → Ż ..Ż  Watin-A */
-                {0x017e, 0x017e,    -1}, /*  1x ž ..ž  → Ž ..Ž  Watin-A */
-                {0x017f, 0x017f,  -300}, /*  1x ſ ..ſ  → S ..S  Watin-A */
-                {0x0180, 0x0180,  +195}, /*  1x ƀ ..ƀ  → Ƀ ..Ƀ  Watin-B */
-                {0x0183, 0x0183,    -1}, /*  1x ƃ ..ƃ  → Ƃ ..Ƃ  Watin-B */
-                {0x0185, 0x0185,    -1}, /*  1x ƅ ..ƅ  → Ƅ ..Ƅ  Watin-B */
-                {0x0188, 0x0188,    -1}, /*  1x ƈ ..ƈ  → Ƈ ..Ƈ  Watin-B */
-                {0x018c, 0x018c,    -1}, /*  1x ƌ ..ƌ  → Ƌ ..Ƌ  Watin-B */
-                {0x0192, 0x0192,    -1}, /*  1x ƒ ..ƒ  → Ƒ ..Ƒ  Watin-B */
-                {0x0195, 0x0195,   +97}, /*  1x ƕ ..ƕ  → Ƕ ..Ƕ  Watin-B */
-                {0x0199, 0x0199,    -1}, /*  1x ƙ ..ƙ  → Ƙ ..Ƙ  Watin-B */
-                {0x019a, 0x019a,  +163}, /*  1x ƚ ..ƚ  → Ƚ ..Ƚ  Watin-B */
-                {0x019e, 0x019e,  +130}, /*  1x ƞ ..ƞ  → Ƞ ..Ƞ  Watin-B */
-                {0x01a1, 0x01a1,    -1}, /*  1x ơ ..ơ  → Ơ ..Ơ  Watin-B */
-                {0x01a3, 0x01a3,    -1}, /*  1x ƣ ..ƣ  → Ƣ ..Ƣ  Watin-B */
-                {0x01a5, 0x01a5,    -1}, /*  1x ƥ ..ƥ  → Ƥ ..Ƥ  Watin-B */
-                {0x01a8, 0x01a8,    -1}, /*  1x ƨ ..ƨ  → Ƨ ..Ƨ  Watin-B */
-                {0x01ad, 0x01ad,    -1}, /*  1x ƭ ..ƭ  → Ƭ ..Ƭ  Watin-B */
-                {0x01b0, 0x01b0,    -1}, /*  1x ư ..ư  → Ư ..Ư  Watin-B */
-                {0x01b4, 0x01b4,    -1}, /*  1x ƴ ..ƴ  → Ƴ ..Ƴ  Watin-B */
-                {0x01b6, 0x01b6,    -1}, /*  1x ƶ ..ƶ  → Ƶ ..Ƶ  Watin-B */
-                {0x01b9, 0x01b9,    -1}, /*  1x ƹ ..ƹ  → Ƹ ..Ƹ  Watin-B */
-                {0x01bd, 0x01bd,    -1}, /*  1x ƽ ..ƽ  → Ƽ ..Ƽ  Watin-B */
-                {0x01bf, 0x01bf,   +56}, /*  1x ƿ ..ƿ  → Ƿ ..Ƿ  Watin-B */
-                {0x01c5, 0x01c5,    -1}, /*  1x ǅ ..ǅ  → Ǆ ..Ǆ  Watin-B */
-                {0x01c6, 0x01c6,    -2}, /*  1x ǆ ..ǆ  → Ǆ ..Ǆ  Watin-B */
-                {0x01c8, 0x01c8,    -1}, /*  1x ǈ ..ǈ  → Ǉ ..Ǉ  Watin-B */
-                {0x01c9, 0x01c9,    -2}, /*  1x ǉ ..ǉ  → Ǉ ..Ǉ  Watin-B */
-                {0x01cb, 0x01cb,    -1}, /*  1x ǋ ..ǋ  → Ǌ ..Ǌ  Watin-B */
-                {0x01cc, 0x01cc,    -2}, /*  1x ǌ ..ǌ  → Ǌ ..Ǌ  Watin-B */
-                {0x01ce, 0x01ce,    -1}, /*  1x ǎ ..ǎ  → Ǎ ..Ǎ  Watin-B */
-                {0x01dd, 0x01dd,   -79}, /*  1x ǝ ..ǝ  → Ǝ ..Ǝ  Watin-B */
-                {0x01f2, 0x01f2,    -1}, /*  1x ǲ ..ǲ  → Ǳ ..Ǳ  Watin-B */
-                {0x01f3, 0x01f3,    -2}, /*  1x ǳ ..ǳ  → Ǳ ..Ǳ  Watin-B */
-                {0x01f5, 0x01f5,    -1}, /*  1x ǵ ..ǵ  → Ǵ ..Ǵ  Watin-B */
-                {0x023c, 0x023c,    -1}, /*  1x ȼ ..ȼ  → Ȼ ..Ȼ  Watin-B */
-                {0x023f, 0x0240,+10815}, /*  2x ȿ ..ɀ  → Ȿ ..Ɀ  Watin-B */
-                {0x0242, 0x0242,    -1}, /*  1x ɂ ..ɂ  → Ɂ ..Ɂ  Watin-B */
-                {0x0247, 0x0247,    -1}, /*  1x ɇ ..ɇ  → Ɇ ..Ɇ  Watin-B */
-                {0x0249, 0x0249,    -1}, /*  1x ɉ ..ɉ  → Ɉ ..Ɉ  Watin-B */
-                {0x024b, 0x024b,    -1}, /*  1x ɋ ..ɋ  → Ɋ ..Ɋ  Watin-B */
-                {0x024d, 0x024d,    -1}, /*  1x ɍ ..ɍ  → Ɍ ..Ɍ  Watin-B */
-                {0x024f, 0x024f,    -1}, /*  1x ɏ ..ɏ  → Ɏ ..Ɏ  Watin-B */
-                {0x037b, 0x037d,  +130}, /*  3x ͻ ..ͽ  → Ͻ ..Ͽ  Greek */
-                {0x03ac, 0x03ac,   -38}, /*  1x ά ..ά  → Ά ..Ά  Greek */
-                {0x03ad, 0x03af,   -37}, /*  3x έ ..ί  → Έ ..Ί  Greek */
-                {0x03b1, 0x03c1,   -32}, /* 17x α ..ρ  → Α ..Ρ  Greek */
-                {0x03c2, 0x03c2,   -31}, /*  1x ς ..ς  → Σ ..Σ  Greek */
-                {0x03c3, 0x03cb,   -32}, /*  9x σ ..ϋ  → Σ ..Ϋ  Greek */
-                {0x03cc, 0x03cc,   -64}, /*  1x ό ..ό  → Ό ..Ό  Greek */
-                {0x03cd, 0x03ce,   -63}, /*  2x ύ ..ώ  → Ύ ..Ώ  Greek */
-                {0x03d0, 0x03d0,   -62}, /*  1x ϐ ..ϐ  → Β ..Β  Greek */
-                {0x03d1, 0x03d1,   -57}, /*  1x ϑ ..ϑ  → Θ ..Θ  Greek */
-                {0x03d5, 0x03d5,   -47}, /*  1x ϕ ..ϕ  → Φ ..Φ  Greek */
-                {0x03d6, 0x03d6,   -54}, /*  1x ϖ ..ϖ  → Π ..Π  Greek */
-                {0x03dd, 0x03dd,    -1}, /*  1x ϝ ..ϝ  → Ϝ ..Ϝ  Greek */
-                {0x03f0, 0x03f0,   -86}, /*  1x ϰ ..ϰ  → Κ ..Κ  Greek */
-                {0x03f1, 0x03f1,   -80}, /*  1x ϱ ..ϱ  → Ρ ..Ρ  Greek */
-                {0x03f5, 0x03f5,   -96}, /*  1x ϵ ..ϵ  → Ε ..Ε  Greek */
-                {0x0430, 0x044f,   -32}, /* 32x а ..я  → А ..Я  Cyrillic */
-                {0x0450, 0x045f,   -80}, /* 16x ѐ ..џ  → Ѐ ..Џ  Cyrillic */
-                {0x0461, 0x0461,    -1}, /*  1x ѡ ..ѡ  → Ѡ ..Ѡ  Cyrillic */
-                {0x0463, 0x0463,    -1}, /*  1x ѣ ..ѣ  → Ѣ ..Ѣ  Cyrillic */
-                {0x0465, 0x0465,    -1}, /*  1x ѥ ..ѥ  → Ѥ ..Ѥ  Cyrillic */
-                {0x0473, 0x0473,    -1}, /*  1x ѳ ..ѳ  → Ѳ ..Ѳ  Cyrillic */
-                {0x0491, 0x0491,    -1}, /*  1x ґ ..ґ  → Ґ ..Ґ  Cyrillic */
-                {0x0499, 0x0499,    -1}, /*  1x ҙ ..ҙ  → Ҙ ..Ҙ  Cyrillic */
-                {0x049b, 0x049b,    -1}, /*  1x қ ..қ  → Қ ..Қ  Cyrillic */
-                {0x0561, 0x0586,   -48}, /* 38x ա ..ֆ  → Ա ..Ֆ  Armenian */
+                {0x00b5, 0x00b5, +743}, /*  1x µ ..µ  → Μ ..Μ  Watin */
+                {0x00e0, 0x00f6, -32}, /* 23x à ..ö  → À ..Ö  Watin */
+                {0x00f8, 0x00fe, -32}, /*  7x ø ..þ  → Ø ..Þ  Watin */
+                {0x00ff, 0x00ff, +121}, /*  1x ÿ ..ÿ  → Ÿ ..Ÿ  Watin */
+                {0x017a, 0x017a, -1}, /*  1x ź ..ź  → Ź ..Ź  Watin-A */
+                {0x017c, 0x017c, -1}, /*  1x ż ..ż  → Ż ..Ż  Watin-A */
+                {0x017e, 0x017e, -1}, /*  1x ž ..ž  → Ž ..Ž  Watin-A */
+                {0x017f, 0x017f, -300}, /*  1x ſ ..ſ  → S ..S  Watin-A */
+                {0x0180, 0x0180, +195}, /*  1x ƀ ..ƀ  → Ƀ ..Ƀ  Watin-B */
+                {0x0183, 0x0183, -1}, /*  1x ƃ ..ƃ  → Ƃ ..Ƃ  Watin-B */
+                {0x0185, 0x0185, -1}, /*  1x ƅ ..ƅ  → Ƅ ..Ƅ  Watin-B */
+                {0x0188, 0x0188, -1}, /*  1x ƈ ..ƈ  → Ƈ ..Ƈ  Watin-B */
+                {0x018c, 0x018c, -1}, /*  1x ƌ ..ƌ  → Ƌ ..Ƌ  Watin-B */
+                {0x0192, 0x0192, -1}, /*  1x ƒ ..ƒ  → Ƒ ..Ƒ  Watin-B */
+                {0x0195, 0x0195, +97}, /*  1x ƕ ..ƕ  → Ƕ ..Ƕ  Watin-B */
+                {0x0199, 0x0199, -1}, /*  1x ƙ ..ƙ  → Ƙ ..Ƙ  Watin-B */
+                {0x019a, 0x019a, +163}, /*  1x ƚ ..ƚ  → Ƚ ..Ƚ  Watin-B */
+                {0x019e, 0x019e, +130}, /*  1x ƞ ..ƞ  → Ƞ ..Ƞ  Watin-B */
+                {0x01a1, 0x01a1, -1}, /*  1x ơ ..ơ  → Ơ ..Ơ  Watin-B */
+                {0x01a3, 0x01a3, -1}, /*  1x ƣ ..ƣ  → Ƣ ..Ƣ  Watin-B */
+                {0x01a5, 0x01a5, -1}, /*  1x ƥ ..ƥ  → Ƥ ..Ƥ  Watin-B */
+                {0x01a8, 0x01a8, -1}, /*  1x ƨ ..ƨ  → Ƨ ..Ƨ  Watin-B */
+                {0x01ad, 0x01ad, -1}, /*  1x ƭ ..ƭ  → Ƭ ..Ƭ  Watin-B */
+                {0x01b0, 0x01b0, -1}, /*  1x ư ..ư  → Ư ..Ư  Watin-B */
+                {0x01b4, 0x01b4, -1}, /*  1x ƴ ..ƴ  → Ƴ ..Ƴ  Watin-B */
+                {0x01b6, 0x01b6, -1}, /*  1x ƶ ..ƶ  → Ƶ ..Ƶ  Watin-B */
+                {0x01b9, 0x01b9, -1}, /*  1x ƹ ..ƹ  → Ƹ ..Ƹ  Watin-B */
+                {0x01bd, 0x01bd, -1}, /*  1x ƽ ..ƽ  → Ƽ ..Ƽ  Watin-B */
+                {0x01bf, 0x01bf, +56}, /*  1x ƿ ..ƿ  → Ƿ ..Ƿ  Watin-B */
+                {0x01c5, 0x01c5, -1}, /*  1x ǅ ..ǅ  → Ǆ ..Ǆ  Watin-B */
+                {0x01c6, 0x01c6, -2}, /*  1x ǆ ..ǆ  → Ǆ ..Ǆ  Watin-B */
+                {0x01c8, 0x01c8, -1}, /*  1x ǈ ..ǈ  → Ǉ ..Ǉ  Watin-B */
+                {0x01c9, 0x01c9, -2}, /*  1x ǉ ..ǉ  → Ǉ ..Ǉ  Watin-B */
+                {0x01cb, 0x01cb, -1}, /*  1x ǋ ..ǋ  → Ǌ ..Ǌ  Watin-B */
+                {0x01cc, 0x01cc, -2}, /*  1x ǌ ..ǌ  → Ǌ ..Ǌ  Watin-B */
+                {0x01ce, 0x01ce, -1}, /*  1x ǎ ..ǎ  → Ǎ ..Ǎ  Watin-B */
+                {0x01dd, 0x01dd, -79}, /*  1x ǝ ..ǝ  → Ǝ ..Ǝ  Watin-B */
+                {0x01f2, 0x01f2, -1}, /*  1x ǲ ..ǲ  → Ǳ ..Ǳ  Watin-B */
+                {0x01f3, 0x01f3, -2}, /*  1x ǳ ..ǳ  → Ǳ ..Ǳ  Watin-B */
+                {0x01f5, 0x01f5, -1}, /*  1x ǵ ..ǵ  → Ǵ ..Ǵ  Watin-B */
+                {0x023c, 0x023c, -1}, /*  1x ȼ ..ȼ  → Ȼ ..Ȼ  Watin-B */
+                {0x023f, 0x0240, +10815}, /*  2x ȿ ..ɀ  → Ȿ ..Ɀ  Watin-B */
+                {0x0242, 0x0242, -1}, /*  1x ɂ ..ɂ  → Ɂ ..Ɂ  Watin-B */
+                {0x0247, 0x0247, -1}, /*  1x ɇ ..ɇ  → Ɇ ..Ɇ  Watin-B */
+                {0x0249, 0x0249, -1}, /*  1x ɉ ..ɉ  → Ɉ ..Ɉ  Watin-B */
+                {0x024b, 0x024b, -1}, /*  1x ɋ ..ɋ  → Ɋ ..Ɋ  Watin-B */
+                {0x024d, 0x024d, -1}, /*  1x ɍ ..ɍ  → Ɍ ..Ɍ  Watin-B */
+                {0x024f, 0x024f, -1}, /*  1x ɏ ..ɏ  → Ɏ ..Ɏ  Watin-B */
+                {0x037b, 0x037d, +130}, /*  3x ͻ ..ͽ  → Ͻ ..Ͽ  Greek */
+                {0x03ac, 0x03ac, -38}, /*  1x ά ..ά  → Ά ..Ά  Greek */
+                {0x03ad, 0x03af, -37}, /*  3x έ ..ί  → Έ ..Ί  Greek */
+                {0x03b1, 0x03c1, -32}, /* 17x α ..ρ  → Α ..Ρ  Greek */
+                {0x03c2, 0x03c2, -31}, /*  1x ς ..ς  → Σ ..Σ  Greek */
+                {0x03c3, 0x03cb, -32}, /*  9x σ ..ϋ  → Σ ..Ϋ  Greek */
+                {0x03cc, 0x03cc, -64}, /*  1x ό ..ό  → Ό ..Ό  Greek */
+                {0x03cd, 0x03ce, -63}, /*  2x ύ ..ώ  → Ύ ..Ώ  Greek */
+                {0x03d0, 0x03d0, -62}, /*  1x ϐ ..ϐ  → Β ..Β  Greek */
+                {0x03d1, 0x03d1, -57}, /*  1x ϑ ..ϑ  → Θ ..Θ  Greek */
+                {0x03d5, 0x03d5, -47}, /*  1x ϕ ..ϕ  → Φ ..Φ  Greek */
+                {0x03d6, 0x03d6, -54}, /*  1x ϖ ..ϖ  → Π ..Π  Greek */
+                {0x03dd, 0x03dd, -1}, /*  1x ϝ ..ϝ  → Ϝ ..Ϝ  Greek */
+                {0x03f0, 0x03f0, -86}, /*  1x ϰ ..ϰ  → Κ ..Κ  Greek */
+                {0x03f1, 0x03f1, -80}, /*  1x ϱ ..ϱ  → Ρ ..Ρ  Greek */
+                {0x03f5, 0x03f5, -96}, /*  1x ϵ ..ϵ  → Ε ..Ε  Greek */
+                {0x0430, 0x044f, -32}, /* 32x а ..я  → А ..Я  Cyrillic */
+                {0x0450, 0x045f, -80}, /* 16x ѐ ..џ  → Ѐ ..Џ  Cyrillic */
+                {0x0461, 0x0461, -1}, /*  1x ѡ ..ѡ  → Ѡ ..Ѡ  Cyrillic */
+                {0x0463, 0x0463, -1}, /*  1x ѣ ..ѣ  → Ѣ ..Ѣ  Cyrillic */
+                {0x0465, 0x0465, -1}, /*  1x ѥ ..ѥ  → Ѥ ..Ѥ  Cyrillic */
+                {0x0473, 0x0473, -1}, /*  1x ѳ ..ѳ  → Ѳ ..Ѳ  Cyrillic */
+                {0x0491, 0x0491, -1}, /*  1x ґ ..ґ  → Ґ ..Ґ  Cyrillic */
+                {0x0499, 0x0499, -1}, /*  1x ҙ ..ҙ  → Ҙ ..Ҙ  Cyrillic */
+                {0x049b, 0x049b, -1}, /*  1x қ ..қ  → Қ ..Қ  Cyrillic */
+                {0x0561, 0x0586, -48}, /* 38x ա ..ֆ  → Ա ..Ֆ  Armenian */
                 {0x10d0, 0x10fa, +3008}, /* 43x ა ..ჺ  → Ა ..Ჺ  Georgian */
                 {0x10fd, 0x10ff, +3008}, /*  3x ჽ ..ჿ  → Ჽ ..Ჿ  Georgian */
-                {0x13f8, 0x13fd,    -8}, /*  6x ᏸ ..ᏽ  → Ᏸ ..Ᏽ  Cherokee */
-                {0x214e, 0x214e,   -28}, /*  1x ⅎ ..ⅎ  → Ⅎ ..Ⅎ  Letterlike */
-                {0x2170, 0x217f,   -16}, /* 16x ⅰ ..ⅿ  → Ⅰ ..Ⅿ  Numbery */
-                {0x2184, 0x2184,    -1}, /*  1x ↄ ..ↄ  → Ↄ ..Ↄ  Numbery */
-                {0x24d0, 0x24e9,   -26}, /* 26x ⓐ ..ⓩ  → Ⓐ ..Ⓩ  Enclosed */
-                {0x2c30, 0x2c5e,   -48}, /* 47x ⰰ ..ⱞ  → Ⰰ ..Ⱞ  Glagolitic */
+                {0x13f8, 0x13fd, -8}, /*  6x ᏸ ..ᏽ  → Ᏸ ..Ᏽ  Cherokee */
+                {0x214e, 0x214e, -28}, /*  1x ⅎ ..ⅎ  → Ⅎ ..Ⅎ  Letterlike */
+                {0x2170, 0x217f, -16}, /* 16x ⅰ ..ⅿ  → Ⅰ ..Ⅿ  Numbery */
+                {0x2184, 0x2184, -1}, /*  1x ↄ ..ↄ  → Ↄ ..Ↄ  Numbery */
+                {0x24d0, 0x24e9, -26}, /* 26x ⓐ ..ⓩ  → Ⓐ ..Ⓩ  Enclosed */
+                {0x2c30, 0x2c5e, -48}, /* 47x ⰰ ..ⱞ  → Ⰰ ..Ⱞ  Glagolitic */
                 {0x2d00, 0x2d25, -7264}, /* 38x ⴀ ..ⴥ  → Ⴀ ..Ⴥ  Georgian2 */
                 {0x2d27, 0x2d27, -7264}, /*  1x ⴧ ..ⴧ  → Ⴧ ..Ⴧ  Georgian2 */
                 {0x2d2d, 0x2d2d, -7264}, /*  1x ⴭ ..ⴭ  → Ⴭ ..Ⴭ  Georgian2 */
-                {0xff41, 0xff5a,   -32}, /* 26x ａ..ｚ → Ａ..Ｚ Dubs */
+                {0xff41, 0xff5a, -32}, /* 26x ａ..ｚ → Ａ..Ｚ Dubs */
             };
             l = 0;
             r = n = sizeof(kUpper) / sizeof(kUpper[0]);
@@ -1037,25 +1033,25 @@ unsigned bestlineUppercase(unsigned c) {
             unsigned b;
             short d;
         } kAstralUpper[] = {
-            {0x10428, 0x1044f,   -40}, /* 40x 𐐨..𐑏 → 𐐀..𐐧 Deseret */
-            {0x104d8, 0x104fb,   -40}, /* 36x 𐓘..𐓻 → 𐒰..𐓓 Osage */
-            {0x1d41a, 0x1d433,   -26}, /* 26x 𝐚..𝐳 → 𝐀..𝐙 Math */
-            {0x1d456, 0x1d467,   -26}, /* 18x 𝑖..𝑧 → 𝐼..𝑍 Math */
-            {0x1d482, 0x1d49b,   -26}, /* 26x 𝒂..𝒛 → 𝑨..𝒁 Math */
-            {0x1d4c8, 0x1d4cf,   -26}, /*  8x 𝓈..𝓏 → 𝒮..𝒵 Math */
-            {0x1d4ea, 0x1d503,   -26}, /* 26x 𝓪..𝔃 → 𝓐..𝓩 Math */
-            {0x1d527, 0x1d52e,   -26}, /*  8x 𝔧..𝔮 → 𝔍..𝔔 Math */
-            {0x1d586, 0x1d59f,   -26}, /* 26x 𝖆..𝖟 → 𝕬..𝖅 Math */
-            {0x1d5ba, 0x1d5d3,   -26}, /* 26x 𝖺..𝗓 → 𝖠..𝖹 Math */
-            {0x1d5ee, 0x1d607,   -26}, /* 26x 𝗮..𝘇 → 𝗔..𝗭 Math */
-            {0x1d622, 0x1d63b,   -26}, /* 26x 𝘢..𝘻 → 𝘈..𝘡 Math */
-            {0x1d68a, 0x1d6a3,  +442}, /* 26x 𝒂..𝒛 → 𝘼..𝙕 Math */
-            {0x1d6c2, 0x1d6d2,   -26}, /* 26x 𝚊..𝚣 → 𝙰..𝚉 Math */
-            {0x1d6fc, 0x1d70c,   -26}, /* 17x 𝛂..𝛒 → 𝚨..𝚸 Math */
-            {0x1d736, 0x1d746,   -26}, /* 17x 𝛼..𝜌 → 𝛢..𝛲 Math */
-            {0x1d770, 0x1d780,   -26}, /* 17x 𝜶..𝝆 → 𝜜..𝜬 Math */
-            {0x1d770, 0x1d756,   -26}, /* 17x 𝝰..𝞀 → 𝝖..𝝦 Math */
-            {0x1d736, 0x1d790,   -90}, /* 17x 𝜶..𝝆 → 𝞐..𝞠 Math */
+            {0x10428, 0x1044f, -40}, /* 40x 𐐨..𐑏 → 𐐀..𐐧 Deseret */
+            {0x104d8, 0x104fb, -40}, /* 36x 𐓘..𐓻 → 𐒰..𐓓 Osage */
+            {0x1d41a, 0x1d433, -26}, /* 26x 𝐚..𝐳 → 𝐀..𝐙 Math */
+            {0x1d456, 0x1d467, -26}, /* 18x 𝑖..𝑧 → 𝐼..𝑍 Math */
+            {0x1d482, 0x1d49b, -26}, /* 26x 𝒂..𝒛 → 𝑨..𝒁 Math */
+            {0x1d4c8, 0x1d4cf, -26}, /*  8x 𝓈..𝓏 → 𝒮..𝒵 Math */
+            {0x1d4ea, 0x1d503, -26}, /* 26x 𝓪..𝔃 → 𝓐..𝓩 Math */
+            {0x1d527, 0x1d52e, -26}, /*  8x 𝔧..𝔮 → 𝔍..𝔔 Math */
+            {0x1d586, 0x1d59f, -26}, /* 26x 𝖆..𝖟 → 𝕬..𝖅 Math */
+            {0x1d5ba, 0x1d5d3, -26}, /* 26x 𝖺..𝗓 → 𝖠..𝖹 Math */
+            {0x1d5ee, 0x1d607, -26}, /* 26x 𝗮..𝘇 → 𝗔..𝗭 Math */
+            {0x1d622, 0x1d63b, -26}, /* 26x 𝘢..𝘻 → 𝘈..𝘡 Math */
+            {0x1d68a, 0x1d6a3, +442}, /* 26x 𝒂..𝒛 → 𝘼..𝙕 Math */
+            {0x1d6c2, 0x1d6d2, -26}, /* 26x 𝚊..𝚣 → 𝙰..𝚉 Math */
+            {0x1d6fc, 0x1d70c, -26}, /* 17x 𝛂..𝛒 → 𝚨..𝚸 Math */
+            {0x1d736, 0x1d746, -26}, /* 17x 𝛼..𝜌 → 𝛢..𝛲 Math */
+            {0x1d770, 0x1d780, -26}, /* 17x 𝜶..𝝆 → 𝜜..𝜬 Math */
+            {0x1d770, 0x1d756, -26}, /* 17x 𝝰..𝞀 → 𝝖..𝝦 Math */
+            {0x1d736, 0x1d790, -90}, /* 17x 𝜶..𝝆 → 𝞐..𝞠 Math */
         };
         l = 0;
         r = n = sizeof(kAstralUpper) / sizeof(kAstralUpper[0]);
@@ -1098,46 +1094,56 @@ static unsigned GetMirror(const unsigned short A[][2], size_t n, unsigned c) {
 
 unsigned bestlineMirrorLeft(unsigned c) {
     static const unsigned short kMirrorRight[][2] = {
-        {L')', L'('},   {L']', L'['},   {L'}', L'{'},   {L'⁆', L'⁅'},
-        {L'⁾', L'⁽'},   {L'₎', L'₍'},   {L'⌉', L'⌈'},   {L'⌋', L'⌊'},
-        {L'〉', L'〈'}, {L'❩', L'❨'},   {L'❫', L'❪'},   {L'❭', L'❬'},
-        {L'❯', L'❮'},   {L'❱', L'❰'},   {L'❳', L'❲'},   {L'❵', L'❴'},
-        {L'⟆', L'⟅'},   {L'⟧', L'⟦'},   {L'⟩', L'⟨'},   {L'⟫', L'⟪'},
-        {L'⟭', L'⟬'},   {L'⟯', L'⟮'},   {L'⦄', L'⦃'},   {L'⦆', L'⦅'},
-        {L'⦈', L'⦇'},   {L'⦊', L'⦉'},   {L'⦌', L'⦋'},   {L'⦎', L'⦏'},
-        {L'⦐', L'⦍'},   {L'⦒', L'⦑'},   {L'⦔', L'⦓'},   {L'⦘', L'⦗'},
-        {L'⧙', L'⧘'},   {L'⧛', L'⧚'},   {L'⧽', L'⧼'},   {L'﹚', L'﹙'},
-        {L'﹜', L'﹛'}, {L'﹞', L'﹝'}, {L'）', L'（'}, {L'］', L'［'},
+        {L')', L'('},   {L']', L'['},   {L'}', L'{'},   {L'⁆', L'⁅'},   {L'⁾', L'⁽'},
+        {L'₎', L'₍'},   {L'⌉', L'⌈'},   {L'⌋', L'⌊'},   {L'〉', L'〈'}, {L'❩', L'❨'},
+        {L'❫', L'❪'},   {L'❭', L'❬'},   {L'❯', L'❮'},   {L'❱', L'❰'},   {L'❳', L'❲'},
+        {L'❵', L'❴'},   {L'⟆', L'⟅'},   {L'⟧', L'⟦'},   {L'⟩', L'⟨'},   {L'⟫', L'⟪'},
+        {L'⟭', L'⟬'},   {L'⟯', L'⟮'},   {L'⦄', L'⦃'},   {L'⦆', L'⦅'},   {L'⦈', L'⦇'},
+        {L'⦊', L'⦉'},   {L'⦌', L'⦋'},   {L'⦎', L'⦏'},   {L'⦐', L'⦍'},   {L'⦒', L'⦑'},
+        {L'⦔', L'⦓'},   {L'⦘', L'⦗'},   {L'⧙', L'⧘'},   {L'⧛', L'⧚'},   {L'⧽', L'⧼'},
+        {L'﹚', L'﹙'}, {L'﹜', L'﹛'}, {L'﹞', L'﹝'}, {L'）', L'（'}, {L'］', L'［'},
         {L'｝', L'｛'}, {L'｣', L'｢'},
     };
-    return GetMirror(kMirrorRight,
-                     sizeof(kMirrorRight) / sizeof(kMirrorRight[0]),
-                     c);
+    return GetMirror(kMirrorRight, sizeof(kMirrorRight) / sizeof(kMirrorRight[0]), c);
 }
 
 unsigned bestlineMirrorRight(unsigned c) {
     static const unsigned short kMirrorLeft[][2] = {
-        {L'(', L')'},   {L'[', L']'},   {L'{', L'}'},   {L'⁅', L'⁆'},
-        {L'⁽', L'⁾'},   {L'₍', L'₎'},   {L'⌈', L'⌉'},   {L'⌊', L'⌋'},
-        {L'〈', L'〉'}, {L'❨', L'❩'},   {L'❪', L'❫'},   {L'❬', L'❭'},
-        {L'❮', L'❯'},   {L'❰', L'❱'},   {L'❲', L'❳'},   {L'❴', L'❵'},
-        {L'⟅', L'⟆'},   {L'⟦', L'⟧'},   {L'⟨', L'⟩'},   {L'⟪', L'⟫'},
-        {L'⟬', L'⟭'},   {L'⟮', L'⟯'},   {L'⦃', L'⦄'},   {L'⦅', L'⦆'},
-        {L'⦇', L'⦈'},   {L'⦉', L'⦊'},   {L'⦋', L'⦌'},   {L'⦍', L'⦐'},
-        {L'⦏', L'⦎'},   {L'⦑', L'⦒'},   {L'⦓', L'⦔'},   {L'⦗', L'⦘'},
-        {L'⧘', L'⧙'},   {L'⧚', L'⧛'},   {L'⧼', L'⧽'},   {L'﹙', L'﹚'},
-        {L'﹛', L'﹜'}, {L'﹝', L'﹞'}, {L'（', L'）'}, {L'［', L'］'},
+        {L'(', L')'},   {L'[', L']'},   {L'{', L'}'},   {L'⁅', L'⁆'},   {L'⁽', L'⁾'},
+        {L'₍', L'₎'},   {L'⌈', L'⌉'},   {L'⌊', L'⌋'},   {L'〈', L'〉'}, {L'❨', L'❩'},
+        {L'❪', L'❫'},   {L'❬', L'❭'},   {L'❮', L'❯'},   {L'❰', L'❱'},   {L'❲', L'❳'},
+        {L'❴', L'❵'},   {L'⟅', L'⟆'},   {L'⟦', L'⟧'},   {L'⟨', L'⟩'},   {L'⟪', L'⟫'},
+        {L'⟬', L'⟭'},   {L'⟮', L'⟯'},   {L'⦃', L'⦄'},   {L'⦅', L'⦆'},   {L'⦇', L'⦈'},
+        {L'⦉', L'⦊'},   {L'⦋', L'⦌'},   {L'⦍', L'⦐'},   {L'⦏', L'⦎'},   {L'⦑', L'⦒'},
+        {L'⦓', L'⦔'},   {L'⦗', L'⦘'},   {L'⧘', L'⧙'},   {L'⧚', L'⧛'},   {L'⧼', L'⧽'},
+        {L'﹙', L'﹚'}, {L'﹛', L'﹜'}, {L'﹝', L'﹞'}, {L'（', L'）'}, {L'［', L'］'},
         {L'｛', L'｝'}, {L'｢', L'｣'},
     };
-    return GetMirror(kMirrorLeft,
-                     sizeof(kMirrorLeft) / sizeof(kMirrorLeft[0]),
-                     c);
+    return GetMirror(kMirrorLeft, sizeof(kMirrorLeft) / sizeof(kMirrorLeft[0]), c);
+}
+
+static char StartsWith(const char *s, const char *prefix) {
+    for (;;) {
+        if (!*prefix)
+            return 1;
+        if (!*s)
+            return 0;
+        if (*s++ != *prefix++)
+            return 0;
+    }
+}
+
+static char EndsWith(const char *s, const char *suffix) {
+    size_t n, m;
+    n = strlen(s);
+    m = strlen(suffix);
+    if (m > n)
+        return 0;
+    return !memcmp(s + n - m, suffix, m);
 }
 
 char bestlineIsXeparator(unsigned c) {
-    return (bestlineIsSeparator(c) &&
-            !bestlineMirrorLeft(c) &&
-            !bestlineMirrorRight(c));
+    return (bestlineIsSeparator(c) && !bestlineMirrorLeft(c) && !bestlineMirrorRight(c));
 }
 
 static unsigned Capitalize(unsigned c) {
@@ -1156,10 +1162,9 @@ static inline int Bsr(unsigned long long x) {
     return b;
 #else
     static const char kDebruijn[64] = {
-        0,  47, 1,  56, 48, 27, 2,  60, 57, 49, 41, 37, 28, 16, 3,  61,
-        54, 58, 35, 52, 50, 42, 21, 44, 38, 32, 29, 23, 17, 11, 4,  62,
-        46, 55, 26, 59, 40, 36, 15, 53, 34, 51, 20, 43, 31, 22, 10, 45,
-        25, 39, 14, 33, 19, 30, 9,  24, 13, 18, 8,  12, 7,  6,  5,  63,
+        0,  47, 1,  56, 48, 27, 2,  60, 57, 49, 41, 37, 28, 16, 3,  61, 54, 58, 35, 52, 50, 42,
+        21, 44, 38, 32, 29, 23, 17, 11, 4,  62, 46, 55, 26, 59, 40, 36, 15, 53, 34, 51, 20, 43,
+        31, 22, 10, 45, 25, 39, 14, 33, 19, 30, 9,  24, 13, 18, 8,  12, 7,  6,  5,  63,
     };
     x |= x >> 1;
     x |= x >> 2;
@@ -1186,15 +1191,16 @@ static struct rune DecodeUtf8(int c) {
 
 static unsigned long long EncodeUtf8(unsigned c) {
     static const unsigned short kTpEnc[32 - 7] = {
-        1|0300<<8, 1|0300<<8, 1|0300<<8, 1|0300<<8, 2|0340<<8,
-        2|0340<<8, 2|0340<<8, 2|0340<<8, 2|0340<<8, 3|0360<<8,
-        3|0360<<8, 3|0360<<8, 3|0360<<8, 3|0360<<8, 4|0370<<8,
-        4|0370<<8, 4|0370<<8, 4|0370<<8, 4|0370<<8, 5|0374<<8,
-        5|0374<<8, 5|0374<<8, 5|0374<<8, 5|0374<<8, 5|0374<<8,
+        1 | 0300 << 8, 1 | 0300 << 8, 1 | 0300 << 8, 1 | 0300 << 8, 2 | 0340 << 8,
+        2 | 0340 << 8, 2 | 0340 << 8, 2 | 0340 << 8, 2 | 0340 << 8, 3 | 0360 << 8,
+        3 | 0360 << 8, 3 | 0360 << 8, 3 | 0360 << 8, 3 | 0360 << 8, 4 | 0370 << 8,
+        4 | 0370 << 8, 4 | 0370 << 8, 4 | 0370 << 8, 4 | 0370 << 8, 5 | 0374 << 8,
+        5 | 0374 << 8, 5 | 0374 << 8, 5 | 0374 << 8, 5 | 0374 << 8, 5 | 0374 << 8,
     };
     int e, n;
     unsigned long long w;
-    if (c < 0200) return c;
+    if (c < 0200)
+        return c;
     e = kTpEnc[Bsr(c) - 7];
     n = e & 0xff;
     w = 0;
@@ -1247,9 +1253,11 @@ static char abGrow(struct abuf *a, int need) {
     int cap;
     char *b;
     cap = a->cap;
-    do cap += cap / 2;
+    do
+        cap += cap / 2;
     while (cap < need);
-    if (!(b = (char *)realloc(a->b, cap * sizeof(*a->b)))) return 0;
+    if (!(b = (char *)realloc(a->b, cap * sizeof(*a->b))))
+        return 0;
     a->cap = cap;
     a->b = b;
     return 1;
@@ -1257,7 +1265,8 @@ static char abGrow(struct abuf *a, int need) {
 
 static void abAppendw(struct abuf *a, unsigned long long w) {
     char *p;
-    if (a->len + 8 > a->cap && !abGrow(a, a->len + 8)) return;
+    if (a->len + 8 > a->cap && !abGrow(a, a->len + 8))
+        return;
     p = a->b + a->len;
     p[0] = (0x00000000000000FF & w) >> 000;
     p[1] = (0x000000000000FF00 & w) >> 010;
@@ -1271,7 +1280,8 @@ static void abAppendw(struct abuf *a, unsigned long long w) {
 }
 
 static void abAppend(struct abuf *a, const char *s, int len) {
-    if (a->len + len + 1 > a->cap && !abGrow(a, a->len + len + 1)) return;
+    if (a->len + len + 1 > a->cap && !abGrow(a, a->len + len + 1))
+        return;
     memcpy(a->b + a->len, s, len);
     a->b[a->len + len] = 0;
     a->len += len;
@@ -1305,18 +1315,20 @@ static char IsCharDev(int fd) {
     return (st.st_mode & S_IFMT) == S_IFCHR;
 }
 
+static int MyRead(int fd, void *c, int);
+static int MyWrite(int fd, const void *c, int);
+static int MyPoll(int fd, int events, int to);
+
+static int (*_MyRead)(int fd, void *c, int n) = MyRead;
+static int (*_MyWrite)(int fd, const void *c, int n) = MyWrite;
+static int (*_MyPoll)(int fd, int events, int to) = MyPoll;
+
 static int WaitUntilReady(int fd, int events) {
-    struct pollfd p[1];
-    p[0].fd = fd;
-    p[0].events = events;
-    return poll(p, 1, -1);
+    return _MyPoll(fd, events, -1);
 }
 
 static char HasPendingInput(int fd) {
-    struct pollfd p[1];
-    p[0].fd = fd;
-    p[0].events = POLLIN;
-    return poll(p, 1, 0) == 1;
+    return _MyPoll(fd, POLLIN, 0) == 1;
 }
 
 static char *GetLineBlock(FILE *f) {
@@ -1350,7 +1362,8 @@ long bestlineReadCharacter(int fd, char *p, unsigned long n) {
     r.n = 0;
     e = errno;
     t = kAscii;
-    if (n) p[0] = 0;
+    if (n)
+        p[0] = 0;
     do {
         for (;;) {
             if (gotint) {
@@ -1358,9 +1371,9 @@ long bestlineReadCharacter(int fd, char *p, unsigned long n) {
                 return -1;
             }
             if (n) {
-                rc = read(fd,&c,1);
+                rc = _MyRead(fd, &c, 1);
             } else {
-                rc = read(fd,0,0);
+                rc = _MyRead(fd, 0, 0);
             }
             if (rc == -1 && errno == EINTR) {
                 if (!i) {
@@ -1392,14 +1405,15 @@ long bestlineReadCharacter(int fd, char *p, unsigned long n) {
         }
         if (i + 1 < n) {
             p[i] = c;
-            p[i+1] = 0;
+            p[i + 1] = 0;
         } else if (i < n) {
             p[i] = 0;
         }
         ++i;
         switch (t) {
         Whoopsie:
-            if (n) p[0] = c;
+            if (n)
+                p[0] = c;
             t = kAscii;
             i = 1;
             /* fallthrough */
@@ -1499,18 +1513,17 @@ long bestlineReadCharacter(int fd, char *p, unsigned long n) {
         case kSs:
             t = kDone;
             break;
-         case kNf:
-             if (0x30 <= c && c <= 0x7e) {
-                 t = kDone;
-             } else if (!(0x20 <= c && c <= 0x2f)) {
-                 goto Whoopsie;
-             }
+        case kNf:
+            if (0x30 <= c && c <= 0x7e) {
+                t = kDone;
+            } else if (!(0x20 <= c && c <= 0x2f)) {
+                goto Whoopsie;
+            }
             break;
         case kCsi1:
             if (0x20 <= c && c <= 0x2f) {
                 t = kCsi2;
-            } else if (c == '[' && ((i == 3) ||
-                                    (i == 4 && p[1] == 033))) {
+            } else if (c == '[' && ((i == 3) || (i == 4 && p[1] == 033))) {
                 /* linux function keys */
             } else if (0x40 <= c && c <= 0x7e) {
                 t = kDone;
@@ -1569,8 +1582,8 @@ static char *GetLineChar(int fin, int fout) {
     sigemptyset(&sa->sa_mask);
     sa->sa_flags = 0;
     sa->sa_handler = bestlineOnInt;
-    sigaction(SIGINT,sa,sa+1);
-    sigaction(SIGQUIT,sa,sa+2);
+    sigaction(SIGINT, sa, sa + 1);
+    sigaction(SIGQUIT, sa, sa + 2);
     for (;;) {
         if (gotint) {
             rc = -1;
@@ -1607,7 +1620,7 @@ static char *GetLineChar(int fin, int fout) {
                     break;
                 }
             } else {
-                write(fout, "\n", 1);
+                _MyWrite(fout, "\n", 1);
                 break;
             }
         } else if (seq[0] == Ctrl('D')) {
@@ -1615,15 +1628,17 @@ static char *GetLineChar(int fin, int fout) {
         } else if (seq[0] == '\n') {
             break;
         } else if (seq[0] == '\b') {
-            while (a.len && (a.b[a.len - 1] & 0300) == 0200) --a.len;
-            if (a.len) --a.len;
+            while (a.len && (a.b[a.len - 1] & 0300) == 0200)
+                --a.len;
+            if (a.len)
+                --a.len;
         }
         if (!IsControl(seq[0])) {
             abAppend(&a, seq, got);
         }
     }
-    sigaction(SIGQUIT,sa+2,0);
-    sigaction(SIGINT,sa+1,0);
+    sigaction(SIGQUIT, sa + 2, 0);
+    sigaction(SIGINT, sa + 1, 0);
     if (gotint) {
         abFree(&a);
         raise(gotint);
@@ -1663,8 +1678,7 @@ static int CompareStrings(const char *a, const char *b) {
     }
 }
 
-static const char *FindSubstringReverse(const char *p, size_t n,
-                                        const char *q, size_t m) {
+static const char *FindSubstringReverse(const char *p, size_t n, const char *q, size_t m) {
     size_t i;
     if (m <= n) {
         n -= m;
@@ -1691,7 +1705,8 @@ static int ParseUnsigned(const char *s, void *e) {
             break;
         }
     }
-    if (e) *(const char **)e = s;
+    if (e)
+        *(const char **)e = s;
     return x;
 }
 
@@ -1782,7 +1797,7 @@ static int bestlineIsUnsupportedTerm(void) {
     if (!once) {
         if ((term = getenv("TERM"))) {
             for (i = 0; i < sizeof(kUnsupported) / sizeof(*kUnsupported); i++) {
-                if (!CompareStrings(term,kUnsupported[i])) {
+                if (!CompareStrings(term, kUnsupported[i])) {
                     res = 1;
                     break;
                 }
@@ -1796,22 +1811,21 @@ static int bestlineIsUnsupportedTerm(void) {
 static int enableRawMode(int fd) {
     struct termios raw;
     struct sigaction sa;
-    if (tcgetattr(fd,&orig_termios) != -1) {
+    if (tcgetattr(fd, &orig_termios) != -1) {
         raw = orig_termios;
         raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
         raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
-        raw.c_oflag &= ~OPOST;
         raw.c_iflag |= IUTF8;
         raw.c_cflag |= CS8;
         raw.c_cc[VMIN] = 1;
         raw.c_cc[VTIME] = 0;
-        if (tcsetattr(fd,TCSANOW,&raw) != -1) {
+        if (tcsetattr(fd, TCSANOW, &raw) != -1) {
             sa.sa_flags = 0;
             sa.sa_handler = bestlineOnCont;
             sigemptyset(&sa.sa_mask);
-            sigaction(SIGCONT,&sa,&orig_cont);
+            sigaction(SIGCONT, &sa, &orig_cont);
             sa.sa_handler = bestlineOnWinch;
-            sigaction(SIGWINCH,&sa,&orig_winch);
+            sigaction(SIGWINCH, &sa, &orig_winch);
             rawmode = fd;
             gotwinch = 0;
             gotcont = 0;
@@ -1832,9 +1846,9 @@ static void bestlineUnpause(int fd) {
 void bestlineDisableRawMode(void) {
     if (rawmode != -1) {
         bestlineUnpause(rawmode);
-        sigaction(SIGCONT,&orig_cont,0);
-        sigaction(SIGWINCH,&orig_winch,0);
-        tcsetattr(rawmode,TCSANOW,&orig_termios);
+        sigaction(SIGCONT, &orig_cont, 0);
+        sigaction(SIGWINCH, &orig_winch, 0);
+        tcsetattr(rawmode, TCSANOW, &orig_termios);
         rawmode = -1;
     }
 }
@@ -1851,7 +1865,7 @@ static int bestlineWrite(int fd, const void *p, size_t n) {
             if (ispaused) {
                 return 0;
             }
-            rc = write(fd, p, n);
+            rc = _MyWrite(fd, p, n);
             if (rc == -1 && errno == EINTR) {
                 continue;
             } else if (rc == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -1881,8 +1895,7 @@ static int bestlineWriteStr(int fd, const char *p) {
     return bestlineWrite(fd, p, strlen(p));
 }
 
-static ssize_t bestlineRead(int fd, char *buf, size_t size,
-                            struct bestlineState *l) {
+static ssize_t bestlineRead(int fd, char *buf, size_t size, struct bestlineState *l) {
     size_t got;
     ssize_t rc;
     int refreshme;
@@ -1894,12 +1907,14 @@ static ssize_t bestlineRead(int fd, char *buf, size_t size,
         }
         if (gotcont && rawmode != -1) {
             enableRawMode(rawmode);
-            if (l) refreshme = 1;
+            if (l)
+                refreshme = 1;
         }
         if (gotwinch && l) {
             refreshme = 1;
         }
-        if (refreshme) bestlineRefreshLine(l);
+        if (refreshme)
+            bestlineRefreshLine(l);
         rc = bestlineReadCharacter(fd, buf, size);
     } while (rc == -1 && errno == EINTR);
     if (rc != -1) {
@@ -1931,39 +1946,36 @@ static struct winsize GetTerminalSize(struct winsize ws, int ifd, int ofd) {
     ssize_t n;
     char *p, *s, b[16];
     ioctl(ofd, TIOCGWINSZ, &ws);
-    if ((!ws.ws_row &&
-         (s = getenv("ROWS")) &&
-         (x = ParseUnsigned(s, 0)))) {
+    if ((!ws.ws_row && (s = getenv("ROWS")) && (x = ParseUnsigned(s, 0)))) {
         ws.ws_row = x;
     }
-    if ((!ws.ws_col &&
-         (s = getenv("COLUMNS")) &&
-         (x = ParseUnsigned(s, 0)))) {
+    if ((!ws.ws_col && (s = getenv("COLUMNS")) && (x = ParseUnsigned(s, 0)))) {
         ws.ws_col = x;
     }
-    if (((!ws.ws_col || !ws.ws_row) &&
-         bestlineRead(ifd,0,0,0) != -1 &&
-         bestlineWriteStr(ofd,
-             "\0337"           /* save position */
-             "\033[9979;9979H" /* move cursor to bottom right corner */
-             "\033[6n"         /* report position */
-             "\0338") != -1 && /* restore position */
-         (n = bestlineRead(ifd,b,sizeof(b),0)) != -1 &&
+    if (((!ws.ws_col || !ws.ws_row) && bestlineRead(ifd, 0, 0, 0) != -1 &&
+         bestlineWriteStr(ofd, "\0337" /* save position */
+                               "\033[9979;9979H" /* move cursor to bottom right corner */
+                               "\033[6n" /* report position */
+                               "\0338") != -1 && /* restore position */
+         (n = bestlineRead(ifd, b, sizeof(b), 0)) != -1 &&
          n && b[0] == 033 && b[1] == '[' && b[n - 1] == 'R')) {
-        p = b+2;
-        if ((x = ParseUnsigned(p,&p))) ws.ws_row = x;
-        if (*p++ == ';' && (x = ParseUnsigned(p,0))) ws.ws_col = x;
+        p = b + 2;
+        if ((x = ParseUnsigned(p, &p)))
+            ws.ws_row = x;
+        if (*p++ == ';' && (x = ParseUnsigned(p, 0)))
+            ws.ws_col = x;
     }
-    if (!ws.ws_col) ws.ws_col = 80;
-    if (!ws.ws_row) ws.ws_row = 24;
+    if (!ws.ws_col)
+        ws.ws_col = 80;
+    if (!ws.ws_row)
+        ws.ws_row = 24;
     return ws;
 }
 
 /* Clear the screen. Used to handle ctrl+l */
 void bestlineClearScreen(int fd) {
-    bestlineWriteStr(fd,
-        "\033[H"    /* move cursor to top left corner */
-        "\033[2J"); /* erase display */
+    bestlineWriteStr(fd, "\033[H" /* move cursor to top left corner */
+                         "\033[2J"); /* erase display */
 }
 
 static void bestlineBeep(void) {
@@ -1974,10 +1986,13 @@ static char bestlineGrow(struct bestlineState *ls, size_t n) {
     char *p;
     size_t m;
     m = ls->buflen;
-    if (m >= n) return 1;
-    do m += m >> 1;
+    if (m >= n)
+        return 1;
+    do
+        m += m >> 1;
     while (m < n);
-    if (!(p = (char *)realloc(ls->buf, m * sizeof(*ls->buf)))) return 0;
+    if (!(p = (char *)realloc(ls->buf, m * sizeof(*ls->buf))))
+        return 0;
     ls->buf = p;
     ls->buflen = m;
     return 1;
@@ -1993,45 +2008,53 @@ static ssize_t bestlineCompleteLine(struct bestlineState *ls, char *seq, int siz
     ssize_t nread;
     size_t i, n, stop;
     bestlineCompletions lc;
-    struct bestlineState saved;
-    nread=0;
-    memset(&lc,0,sizeof(lc));
-    completionCallback(ls->buf,&lc);
+    struct bestlineState original, saved;
+    nread = 0;
+    memset(&lc, 0, sizeof(lc));
+    completionCallback(ls->buf, ls->pos, &lc);
     if (!lc.len) {
         bestlineBeep();
     } else {
         i = 0;
         stop = 0;
+        original = *ls;
         while (!stop) {
             /* Show completion or original buffer */
             if (i < lc.len) {
                 saved = *ls;
-                ls->len = ls->pos = strlen(lc.cvec[i]);
+                ls->len = strlen(lc.cvec[i]);
+                ls->pos = original.pos + ls->len - original.len;
                 ls->buf = lc.cvec[i];
                 bestlineRefreshLine(ls);
                 ls->len = saved.len;
                 ls->pos = saved.pos;
                 ls->buf = saved.buf;
+                if (lc.len == 1) {
+                    nread = 0;
+                    goto FinishQuickly;
+                }
             } else {
                 bestlineRefreshLine(ls);
             }
-            if ((nread = bestlineRead(ls->ifd,seq,size,ls)) <= 0) {
+            if ((nread = bestlineRead(ls->ifd, seq, size, ls)) <= 0) {
                 bestlineFreeCompletions(&lc);
                 return -1;
             }
             switch (seq[0]) {
             case '\t':
-                i = (i+1) % (lc.len+1);
+                i = (i + 1) % (lc.len + 1);
                 if (i == lc.len) {
                     bestlineBeep();
                 }
                 break;
             default:
                 if (i < lc.len) {
+                FinishQuickly:
                     n = strlen(lc.cvec[i]);
                     if (bestlineGrow(ls, n + 1)) {
                         memcpy(ls->buf, lc.cvec[i], n + 1);
-                        ls->len = ls->pos = n;
+                        ls->len = n;
+                        ls->pos = original.pos + n - original.len;
                     }
                 }
                 stop = 1;
@@ -2045,8 +2068,11 @@ static ssize_t bestlineCompleteLine(struct bestlineState *ls, char *seq, int siz
 
 static void bestlineEditHistoryGoto(struct bestlineState *l, unsigned i) {
     size_t n;
-    if (historylen <= 1) return;
-    i = Max(Min(i,historylen-1),0);
+    if (historylen <= 1)
+        return;
+    if (i > historylen - 1)
+        return;
+    i = Max(Min(i, historylen - 1), 0);
     free(history[historylen - 1 - l->hindex]);
     history[historylen - 1 - l->hindex] = strdup(l->buf);
     l->hindex = i;
@@ -2060,18 +2086,19 @@ static void bestlineEditHistoryGoto(struct bestlineState *l, unsigned i) {
 }
 
 static void bestlineEditHistoryMove(struct bestlineState *l, int dx) {
-    bestlineEditHistoryGoto(l,l->hindex+dx);
+    bestlineEditHistoryGoto(l, l->hindex + dx);
 }
 
 static char *bestlineMakeSearchPrompt(struct abuf *ab, int fail, const char *s, int n) {
-    ab->len=0;
-    abAppendw(ab,'(');
-    if (fail) abAppends(ab,"failed ");
-    abAppends(ab,"reverse-i-search `\033[4m");
-    abAppend(ab,s,n);
-    abAppends(ab,"\033[24m");
-    abAppends(ab,s+n);
-    abAppendw(ab,Read32le("') "));
+    ab->len = 0;
+    abAppendw(ab, '(');
+    if (fail)
+        abAppends(ab, "failed ");
+    abAppends(ab, "reverse-i-search `\033[4m");
+    abAppend(ab, s, n);
+    abAppends(ab, "\033[24m");
+    abAppends(ab, s + n);
+    abAppendw(ab, Read32le("') "));
     return ab->b;
 }
 
@@ -2083,20 +2110,21 @@ static int bestlineSearch(struct bestlineState *l, char *seq, int size) {
     unsigned i, j, k, matlen;
     const char *oldprompt, *q;
     int rc, fail, added, oldpos, oldindex;
-    if (historylen <= 1) return 0;
+    if (historylen <= 1)
+        return 0;
     abInit(&ab);
     abInit(&prompt);
     oldpos = l->pos;
     oldprompt = l->prompt;
     oldindex = l->hindex;
-    for (fail=matlen=0;;) {
-        l->prompt = bestlineMakeSearchPrompt(&prompt,fail,ab.b,matlen);
+    for (fail = matlen = 0;;) {
+        l->prompt = bestlineMakeSearchPrompt(&prompt, fail, ab.b, matlen);
         bestlineRefreshLine(l);
         fail = 1;
         added = 0;
         j = l->pos;
         i = l->hindex;
-        rc = bestlineRead(l->ifd,seq,size,l);
+        rc = bestlineRead(l->ifd, seq, size, l);
         if (rc > 0) {
             if (seq[0] == Ctrl('?') || seq[0] == Ctrl('H')) {
                 if (ab.len) {
@@ -2111,14 +2139,14 @@ static int bestlineSearch(struct bestlineState *l, char *seq, int size) {
                     j = strlen(history[historylen - 1 - i]);
                 }
             } else if (seq[0] == Ctrl('G')) {
-                bestlineEditHistoryGoto(l,oldindex);
+                bestlineEditHistoryGoto(l, oldindex);
                 l->pos = oldpos;
                 rc = 0;
                 break;
             } else if (IsControl(seq[0])) { /* only sees canonical c0 */
                 break;
             } else {
-                abAppend(&ab,seq,rc);
+                abAppend(&ab, seq, rc);
                 added = rc;
             }
         } else {
@@ -2135,7 +2163,7 @@ static int bestlineSearch(struct bestlineState *l, char *seq, int size) {
                 j = k;
             }
             if ((q = FindSubstringReverse(p, j, ab.b, ab.len))) {
-                bestlineEditHistoryGoto(l,i);
+                bestlineEditHistoryGoto(l, i);
                 l->pos = q - p;
                 fail = 0;
                 if (added) {
@@ -2169,8 +2197,10 @@ static void bestlineRingFree(void) {
 
 static void bestlineRingPush(const char *p, size_t n) {
     char *q;
-    if (!n) return;
-    if (!(q = (char *)malloc(n + 1))) return;
+    if (!n)
+        return;
+    if (!(q = (char *)malloc(n + 1)))
+        return;
     ring.i = (ring.i + 1) % BESTLINE_MAX_RING;
     free(ring.p[ring.i]);
     ring.p[ring.i] = (char *)memcpy(q, p, n);
@@ -2181,29 +2211,34 @@ static void bestlineRingRotate(void) {
     size_t i;
     for (i = 0; i < BESTLINE_MAX_RING; ++i) {
         ring.i = (ring.i - 1) % BESTLINE_MAX_RING;
-        if (ring.p[ring.i]) break;
+        if (ring.p[ring.i])
+            break;
     }
 }
 
 static char *bestlineRefreshHints(struct bestlineState *l) {
     char *hint;
     struct abuf ab;
-    const char *ansi1, *ansi2;
-    if (!hintsCallback) return 0;
-    if (!(hint = hintsCallback(l->buf, &ansi1, &ansi2))) return 0;
+    const char *ansi1 = "\033[90m", *ansi2 = "\033[39m";
+    if (!hintsCallback)
+        return 0;
+    if (!(hint = hintsCallback(l->buf, &ansi1, &ansi2)))
+        return 0;
     abInit(&ab);
-    ansi1 = "\033[90m";
-    ansi2 = "\033[39m";
-    if (ansi1) abAppends(&ab, ansi1);
+    if (ansi1)
+        abAppends(&ab, ansi1);
     abAppends(&ab, hint);
-    if (ansi2) abAppends(&ab, ansi2);
-    if (freeHintsCallback) freeHintsCallback(hint);
+    if (ansi2)
+        abAppends(&ab, ansi2);
+    if (freeHintsCallback)
+        freeHintsCallback(hint);
     return ab.b;
 }
 
 static size_t Backward(struct bestlineState *l, size_t pos) {
     if (pos) {
-        do --pos;
+        do
+            --pos;
         while (pos && (l->buf[pos] & 0300) == 0200);
     }
     return pos;
@@ -2267,7 +2302,8 @@ static int bestlineEditMirrorRight(struct bestlineState *l, int res[2]) {
 static int bestlineEditMirror(struct bestlineState *l, int res[2]) {
     int rc;
     rc = bestlineEditMirrorLeft(l, res);
-    if (rc == -1) rc = bestlineEditMirrorRight(l, res);
+    if (rc == -1)
+        rc = bestlineEditMirrorRight(l, res);
     return rc;
 }
 
@@ -2322,9 +2358,12 @@ StartOver:
      * we kludge xn to address the edge case of wide chars on the edge
      */
     for (tn = xn - haswides * 2;;) {
-        if (pwidth + width + 1 < tn * yn) break; /* we're fine */
-        if (!len || width < 2) break;            /* we can't do anything */
-        if (pwidth + 2 > tn * yn) break;         /* we can't do anything */
+        if (pwidth + width + 1 < tn * yn)
+            break; /* we're fine */
+        if (!len || width < 2)
+            break; /* we can't do anything */
+        if (pwidth + 2 > tn * yn)
+            break; /* we can't do anything */
         if (pos > len / 2) {
             /* hide content on the left if we're editing on the right */
             rune = GetUtf8(buf, len);
@@ -2334,8 +2373,10 @@ StartOver:
         } else {
             /* hide content on the right if we're editing on left */
             t = len;
-            while (len && (buf[len - 1] & 0300) == 0200) --len;
-            if (len) --len;
+            while (len && (buf[len - 1] & 0300) == 0200)
+                --len;
+            if (len)
+                --len;
             rune = GetUtf8(buf + len, t - len);
         }
         if ((t = GetMonospaceCharacterWidth(rune.c)) > 0) {
@@ -2375,10 +2416,13 @@ StartOver:
     for (i = 0; i < len; i += rune.n) {
         rune = GetUtf8(buf + i, len - i);
         if (x && x + rune.n > xn) {
-            if (cy >= 0) ++cy;
-            abAppends(&ab, "\033[K"  /* clear line forward */
-                           "\r"      /* start of line */
-                           "\n");    /* cursor down unclamped */
+            if (cy >= 0)
+                ++cy;
+            if (x < xn) {
+                abAppends(&ab, "\033[K"); /* clear line forward */
+            }
+            abAppends(&ab, "\r" /* start of line */
+                           "\n"); /* cursor down unclamped */
             ++rows;
             x = 0;
         }
@@ -2390,9 +2434,11 @@ StartOver:
             abAppendw(&ab, '*');
         } else {
             flipit = hasflip && (i == flip[0] || i == flip[1]);
-            if (flipit) abAppends(&ab, "\033[1m");
+            if (flipit)
+                abAppends(&ab, "\033[1m");
             abAppendw(&ab, EncodeUtf8(rune.c));
-            if (flipit) abAppends(&ab, "\033[22m");
+            if (flipit)
+                abAppends(&ab, "\033[22m");
         }
         t = GetMonospaceCharacterWidth(rune.c);
         t = Max(0, t);
@@ -2462,9 +2508,9 @@ static void bestlineRefreshLineForce(struct bestlineState *l) {
     bestlineRefreshLineImpl(l, 1);
 }
 
-static void bestlineEditInsert(struct bestlineState *l,
-                               const char *p, size_t n) {
-    if (!bestlineGrow(l, l->len + n + 1)) return;
+static void bestlineEditInsert(struct bestlineState *l, const char *p, size_t n) {
+    if (!bestlineGrow(l, l->len + n + 1))
+        return;
     memmove(l->buf + l->pos + n, l->buf + l->pos, l->len - l->pos);
     memcpy(l->buf + l->pos, p, n);
     l->pos += n;
@@ -2484,19 +2530,19 @@ static void bestlineEditEnd(struct bestlineState *l) {
 }
 
 static void bestlineEditUp(struct bestlineState *l) {
-    bestlineEditHistoryMove(l,BESTLINE_HISTORY_PREV);
+    bestlineEditHistoryMove(l, BESTLINE_HISTORY_PREV);
 }
 
 static void bestlineEditDown(struct bestlineState *l) {
-    bestlineEditHistoryMove(l,BESTLINE_HISTORY_NEXT);
+    bestlineEditHistoryMove(l, BESTLINE_HISTORY_NEXT);
 }
 
 static void bestlineEditBof(struct bestlineState *l) {
-    bestlineEditHistoryMove(l,BESTLINE_HISTORY_FIRST);
+    bestlineEditHistoryGoto(l, historylen - 1);
 }
 
 static void bestlineEditEof(struct bestlineState *l) {
-    bestlineEditHistoryMove(l,BESTLINE_HISTORY_LAST);
+    bestlineEditHistoryGoto(l, 0);
 }
 
 static void bestlineEditRefresh(struct bestlineState *l) {
@@ -2548,19 +2594,22 @@ static size_t BackwardWord(struct bestlineState *l, size_t pos) {
     return pos;
 }
 
-static size_t EscapeWord(struct bestlineState *l) {
-    size_t i, j;
+static size_t EscapeWord(struct bestlineState *l, size_t i) {
+    size_t j;
     struct rune r;
-    for (i = l->pos; i && i < l->len; i += r.n) {
+    for (; i && i < l->len; i += r.n) {
         if (i < l->len) {
             r = GetUtf8(l->buf + i, l->len - i);
-            if (bestlineIsSeparator(r.c)) break;
+            if (bestlineIsSeparator(r.c))
+                break;
         }
         if ((j = i)) {
-            do --j;
+            do
+                --j;
             while (j && (l->buf[j] & 0300) == 0200);
             r = GetUtf8(l->buf + j, l->len - j);
-            if (bestlineIsSeparator(r.c)) break;
+            if (bestlineIsSeparator(r.c))
+                break;
         }
     }
     return i;
@@ -2572,8 +2621,10 @@ static void bestlineEditLeft(struct bestlineState *l) {
 }
 
 static void bestlineEditRight(struct bestlineState *l) {
-    if (l->pos == l->len) return;
-    do l->pos++;
+    if (l->pos == l->len)
+        return;
+    do
+        l->pos++;
     while (l->pos < l->len && (l->buf[l->pos] & 0300) == 0200);
     bestlineRefreshLine(l);
 }
@@ -2612,18 +2663,20 @@ static void bestlineEditRightExpr(struct bestlineState *l) {
 
 static void bestlineEditDelete(struct bestlineState *l) {
     size_t i;
-    if (l->pos == l->len) return;
+    if (l->pos == l->len)
+        return;
     i = Forward(l, l->pos);
-    memmove(l->buf+l->pos, l->buf+i, l->len-i+1);
+    memmove(l->buf + l->pos, l->buf + i, l->len - i + 1);
     l->len -= i - l->pos;
     bestlineRefreshLine(l);
 }
 
 static void bestlineEditRubout(struct bestlineState *l) {
     size_t i;
-    if (!l->pos) return;
+    if (!l->pos)
+        return;
     i = Backward(l, l->pos);
-    memmove(l->buf+i, l->buf+l->pos, l->len-l->pos+1);
+    memmove(l->buf + i, l->buf + l->pos, l->len - l->pos + 1);
     l->len -= l->pos - i;
     l->pos = i;
     bestlineRefreshLine(l);
@@ -2631,7 +2684,8 @@ static void bestlineEditRubout(struct bestlineState *l) {
 
 static void bestlineEditDeleteWord(struct bestlineState *l) {
     size_t i;
-    if (l->pos == l->len) return;
+    if (l->pos == l->len)
+        return;
     i = ForwardWord(l, l->pos);
     bestlineRingPush(l->buf + l->pos, i - l->pos);
     memmove(l->buf + l->pos, l->buf + i, l->len - i + 1);
@@ -2641,7 +2695,8 @@ static void bestlineEditDeleteWord(struct bestlineState *l) {
 
 static void bestlineEditRuboutWord(struct bestlineState *l) {
     size_t i;
-    if (!l->pos) return;
+    if (!l->pos)
+        return;
     i = BackwardWord(l, l->pos);
     bestlineRingPush(l->buf + i, l->pos - i);
     memmove(l->buf + i, l->buf + l->pos, l->len - l->pos + 1);
@@ -2659,7 +2714,8 @@ static void bestlineEditXlatWord(struct bestlineState *l, unsigned xlat(unsigned
     i = Forwards(l, l->pos, bestlineIsSeparator);
     for (j = i; j < l->len; j += r.n) {
         r = GetUtf8(l->buf + j, l->len - j);
-        if (bestlineIsSeparator(r.c)) break;
+        if (bestlineIsSeparator(r.c))
+            break;
         if ((c = xlat(r.c)) != r.c) {
             abAppendw(&ab, EncodeUtf8(c));
         } else { /* avoid canonicalization */
@@ -2695,7 +2751,7 @@ static void bestlineEditKillLeft(struct bestlineState *l) {
     old_pos = l->pos;
     l->pos = 0;
     diff = old_pos - l->pos;
-    memmove(l->buf+l->pos,l->buf+old_pos,l->len-old_pos+1);
+    memmove(l->buf + l->pos, l->buf + old_pos, l->len - old_pos + 1);
     l->len -= diff;
     bestlineRefreshLine(l);
 }
@@ -2710,10 +2766,13 @@ static void bestlineEditKillRight(struct bestlineState *l) {
 static void bestlineEditYank(struct bestlineState *l) {
     char *p;
     size_t n;
-    if (!ring.p[ring.i]) return;
+    if (!ring.p[ring.i])
+        return;
     n = strlen(ring.p[ring.i]);
-    if (!bestlineGrow(l, l->len + n + 1)) return;
-    if (!(p = (char *)malloc(l->len - l->pos + 1))) return;
+    if (!bestlineGrow(l, l->len + n + 1))
+        return;
+    if (!(p = (char *)malloc(l->len - l->pos + 1)))
+        return;
     memcpy(p, l->buf + l->pos, l->len - l->pos + 1);
     memcpy(l->buf + l->pos, ring.p[ring.i], n);
     memcpy(l->buf + l->pos + n, p, l->len - l->pos + 1);
@@ -2726,8 +2785,7 @@ static void bestlineEditYank(struct bestlineState *l) {
 }
 
 static void bestlineEditRotate(struct bestlineState *l) {
-    if ((l->seq[1][0] == Ctrl('Y') ||
-         (l->seq[1][0] == 033 && l->seq[1][1] == 'y'))) {
+    if ((l->seq[1][0] == Ctrl('Y') || (l->seq[1][0] == 033 && l->seq[1][1] == 'y'))) {
         if (l->yi < l->len && l->yj <= l->len) {
             memmove(l->buf + l->yi, l->buf + l->yj, l->len - l->yj + 1);
             l->len -= l->yj - l->yi;
@@ -2742,9 +2800,12 @@ static void bestlineEditTranspose(struct bestlineState *l) {
     char *q, *p;
     size_t a, b, c;
     b = l->pos;
+    if (b == l->len)
+        --b;
     a = Backward(l, b);
     c = Forward(l, b);
-    if (!(a < b && b < c)) return;
+    if (!(a < b && b < c))
+        return;
     p = q = (char *)malloc(c - a);
     p = Copy(p, l->buf + b, c - b);
     p = Copy(p, l->buf + a, b - a);
@@ -2757,13 +2818,19 @@ static void bestlineEditTranspose(struct bestlineState *l) {
 
 static void bestlineEditTransposeWords(struct bestlineState *l) {
     char *q, *p;
-    size_t pi, xi, xj, yi, yj;
-    pi = EscapeWord(l);
+    size_t i, pi, xi, xj, yi, yj;
+    i = l->pos;
+    if (i == l->len) {
+        i = Backwards(l, i, bestlineIsSeparator);
+        i = Backwards(l, i, bestlineNotSeparator);
+    }
+    pi = EscapeWord(l, i);
     xj = Backwards(l, pi, bestlineIsSeparator);
     xi = Backwards(l, xj, bestlineNotSeparator);
     yi = Forwards(l, pi, bestlineIsSeparator);
     yj = Forwards(l, yi, bestlineNotSeparator);
-    if (!(xi < xj && xj < yi && yi < yj)) return;
+    if (!(xi < xj && xj < yi && yi < yj))
+        return;
     p = q = (char *)malloc(yj - xi);
     p = Copy(p, l->buf + yi, yj - yi);
     p = Copy(p, l->buf + xj, yi - xj);
@@ -2779,10 +2846,11 @@ static void bestlineEditSqueeze(struct bestlineState *l) {
     size_t i, j;
     i = Backwards(l, l->pos, bestlineIsSeparator);
     j = Forwards(l, l->pos, bestlineIsSeparator);
-    if (!(i < j)) return;
+    if (!(i < j))
+        return;
     memmove(l->buf + i, l->buf + j, l->len - j + 1);
     l->len -= j - i;
-    l->pos  = i;
+    l->pos = i;
     bestlineRefreshLine(l);
 }
 
@@ -2791,7 +2859,8 @@ static void bestlineEditMark(struct bestlineState *l) {
 }
 
 static void bestlineEditGoto(struct bestlineState *l) {
-    if (l->mark > l->len) return;
+    if (l->mark > l->len)
+        return;
     l->pos = Min(l->mark, l->len);
     bestlineRefreshLine(l);
 }
@@ -2802,19 +2871,18 @@ static size_t bestlineEscape(char *d, const char *s, size_t n) {
     unsigned c, w, l;
     for (p = d, l = i = 0; i < n; ++i) {
         switch ((c = s[i] & 255)) {
-        Case('\a', w = Read16le("\\a"));
-        Case('\b', w = Read16le("\\b"));
-        Case('\t', w = Read16le("\\t"));
-        Case('\n', w = Read16le("\\n"));
-        Case('\v', w = Read16le("\\v"));
-        Case('\f', w = Read16le("\\f"));
-        Case('\r', w = Read16le("\\r"));
-        Case('"',  w = Read16le("\\\""));
-        Case('\'', w = Read16le("\\\'"));
-        Case('\\', w = Read16le("\\\\"));
+            Case('\a', w = Read16le("\\a"));
+            Case('\b', w = Read16le("\\b"));
+            Case('\t', w = Read16le("\\t"));
+            Case('\n', w = Read16le("\\n"));
+            Case('\v', w = Read16le("\\v"));
+            Case('\f', w = Read16le("\\f"));
+            Case('\r', w = Read16le("\\r"));
+            Case('"', w = Read16le("\\\""));
+            Case('\'', w = Read16le("\\\'"));
+            Case('\\', w = Read16le("\\\\"));
         default:
-            if (c <= 0x1F || c == 0x7F ||
-                (c == '?' && l == '?')) {
+            if (c <= 0x1F || c == 0x7F || (c == '?' && l == '?')) {
                 w = Read16le("\\x");
                 w |= "0123456789abcdef"[(c & 0xF0) >> 4] << 020;
                 w |= "0123456789abcdef"[(c & 0x0F) >> 0] << 030;
@@ -2891,11 +2959,12 @@ static void bestlineEditCtrlq(struct bestlineState *l) {
 static void bestlineEditBarf(struct bestlineState *l) {
     struct rune r;
     unsigned long w;
-    size_t i, j, pos, depth = 0;
+    size_t i, pos, depth = 0;
     unsigned lhs, rhs, end, *stack = 0;
     /* go as far right within current s-expr as possible */
     for (pos = l->pos;; pos += r.n) {
-        if (pos == l->len) goto Finish;
+        if (pos == l->len)
+            goto Finish;
         r = GetUtf8(l->buf + pos, l->len - pos);
         if (depth) {
             if (r.c == stack[depth - 1]) {
@@ -2903,7 +2972,7 @@ static void bestlineEditBarf(struct bestlineState *l) {
             }
         } else {
             if ((rhs = bestlineMirrorRight(r.c))) {
-                stack = realloc(stack, ++depth * sizeof(*stack));
+                stack = (unsigned *)realloc(stack, ++depth * sizeof(*stack));
                 stack[depth - 1] = rhs;
             } else if (bestlineMirrorLeft(r.c)) {
                 end = pos;
@@ -2914,7 +2983,8 @@ static void bestlineEditBarf(struct bestlineState *l) {
     /* go back one item */
     pos = Backwards(l, pos, bestlineIsXeparator);
     for (;; pos = i) {
-        if (!pos) goto Finish;
+        if (!pos)
+            goto Finish;
         i = Backward(l, pos);
         r = GetUtf8(l->buf + i, l->len - i);
         if (depth) {
@@ -2923,7 +2993,7 @@ static void bestlineEditBarf(struct bestlineState *l) {
             }
         } else {
             if ((lhs = bestlineMirrorLeft(r.c))) {
-                stack = realloc(stack, ++depth * sizeof(*stack));
+                stack = (unsigned *)realloc(stack, ++depth * sizeof(*stack));
                 stack[depth - 1] = lhs;
             } else if (bestlineIsSeparator(r.c)) {
                 break;
@@ -2963,8 +3033,7 @@ Finish:
 static void bestlineEditSlurp(struct bestlineState *l) {
     char rp[6];
     struct rune r;
-    unsigned long w;
-    size_t i, pos, depth = 0;
+    size_t pos, depth = 0;
     unsigned rhs, point = 0, start = 0, *stack = 0;
     /* go to outside edge of current s-expr */
     for (pos = l->pos; pos < l->len; pos += r.n) {
@@ -2975,7 +3044,7 @@ static void bestlineEditSlurp(struct bestlineState *l) {
             }
         } else {
             if ((rhs = bestlineMirrorRight(r.c))) {
-                stack = realloc(stack, ++depth * sizeof(*stack));
+                stack = (unsigned *)realloc(stack, ++depth * sizeof(*stack));
                 stack[depth - 1] = rhs;
             } else if (bestlineMirrorLeft(r.c)) {
                 point = pos;
@@ -2987,7 +3056,7 @@ static void bestlineEditSlurp(struct bestlineState *l) {
     }
     /* go forward one item */
     pos = Forwards(l, pos, bestlineIsXeparator);
-    for (; pos < l->len ; pos += r.n) {
+    for (; pos < l->len; pos += r.n) {
         r = GetUtf8(l->buf + pos, l->len - pos);
         if (depth) {
             if (r.c == stack[depth - 1]) {
@@ -2995,7 +3064,7 @@ static void bestlineEditSlurp(struct bestlineState *l) {
             }
         } else {
             if ((rhs = bestlineMirrorRight(r.c))) {
-                stack = realloc(stack, ++depth * sizeof(*stack));
+                stack = (unsigned *)realloc(stack, ++depth * sizeof(*stack));
                 stack[depth - 1] = rhs;
             } else if (bestlineIsSeparator(r.c)) {
                 break;
@@ -3011,6 +3080,18 @@ static void bestlineEditSlurp(struct bestlineState *l) {
 }
 
 static void bestlineEditRaise(struct bestlineState *l) {
+    (void)l;
+}
+
+static char IsBalanced(struct abuf *buf) {
+    unsigned i, d;
+    for (d = i = 0; i < buf->len; ++i) {
+        if (buf->b[i] == '(')
+            ++d;
+        else if (d > 0 && buf->b[i] == ')')
+            --d;
+    }
+    return d == 0;
 }
 
 /**
@@ -3025,33 +3106,45 @@ static void bestlineEditRaise(struct bestlineState *l) {
  *
  * Returns chomped character count in buf >=0 or -1 on eof / error
  */
-static ssize_t bestlineEdit(int stdin_fd, int stdout_fd, const char *prompt,
+static ssize_t bestlineEdit(int stdin_fd, int stdout_fd, const char *prompt, const char *init,
                             char **obuf) {
     ssize_t rc;
+    char seq[16];
+    const char *promptnotnull, *promptlastnl;
     size_t nread;
+    int pastemode;
     struct rune rune;
-    char *p, seq[16];
     unsigned long long w;
     struct bestlineState l;
-    memset(&l,0,sizeof(l));
-    if (!(l.buf = (char *)malloc((l.buflen = 32)))) return -1;
+    pastemode = 0;
+    memset(&l, 0, sizeof(l));
+    if (!(l.buf = (char *)malloc((l.buflen = 32))))
+        return -1;
     l.buf[0] = 0;
     l.ifd = stdin_fd;
     l.ofd = stdout_fd;
-    l.prompt = prompt ? prompt : "";
-    l.ws = GetTerminalSize(l.ws,l.ifd,l.ofd);
+    promptnotnull = prompt ? prompt : "";
+    promptlastnl = strrchr(promptnotnull, '\n');
+    l.prompt = promptlastnl ? promptlastnl + 1 : promptnotnull;
+    l.ws = GetTerminalSize(l.ws, l.ifd, l.ofd);
+    abInit(&l.full);
     bestlineHistoryAdd("");
-    bestlineWriteStr(l.ofd,l.prompt);
+    bestlineWriteStr(l.ofd, promptnotnull);
+    init = init ? init : "";
+    bestlineEditInsert(&l, init, strlen(init));
     while (1) {
-        if (l.dirty) bestlineRefreshLineForce(&l);
-        rc = bestlineRead(l.ifd,seq,sizeof(seq),&l);
+        if (l.dirty)
+            bestlineRefreshLineForce(&l);
+        rc = bestlineRead(l.ifd, seq, sizeof(seq), &l);
         if (rc > 0) {
             if (seq[0] == Ctrl('R')) {
-                rc = bestlineSearch(&l,seq,sizeof(seq));
-                if (!rc) continue;
+                rc = bestlineSearch(&l, seq, sizeof(seq));
+                if (!rc)
+                    continue;
             } else if (seq[0] == '\t' && completionCallback) {
-                rc = bestlineCompleteLine(&l,seq,sizeof(seq));
-                if (!rc) continue;
+                rc = bestlineCompleteLine(&l, seq, sizeof(seq));
+                if (!rc)
+                    continue;
             }
         }
         if (rc > 0) {
@@ -3061,40 +3154,48 @@ static ssize_t bestlineEdit(int stdin_fd, int stdout_fd, const char *prompt,
             seq[0] = '\r';
             seq[1] = 0;
         } else {
-            free(history[--historylen]);
-            history[historylen] = 0;
+            if (historylen) {
+                free(history[--historylen]);
+                history[historylen] = 0;
+            }
             free(l.buf);
+            abFree(&l.full);
             return -1;
         }
         switch (seq[0]) {
-        Case(Ctrl('P'), bestlineEditUp(&l));
-        Case(Ctrl('E'), bestlineEditEnd(&l));
-        Case(Ctrl('N'), bestlineEditDown(&l));
-        Case(Ctrl('A'), bestlineEditHome(&l));
-        Case(Ctrl('B'), bestlineEditLeft(&l));
-        Case(Ctrl('@'), bestlineEditMark(&l));
-        Case(Ctrl('Y'), bestlineEditYank(&l));
-        Case(Ctrl('Q'), bestlineEditCtrlq(&l));
-        Case(Ctrl('F'), bestlineEditRight(&l));
-        Case(Ctrl('\\'), bestlineEditQuit());
-        Case(Ctrl('S'), bestlineEditPause(&l));
-        Case(Ctrl('?'), bestlineEditRubout(&l));
-        Case(Ctrl('H'), bestlineEditRubout(&l));
-        Case(Ctrl('L'), bestlineEditRefresh(&l));
-        Case(Ctrl('Z'), bestlineEditSuspend());
-        Case(Ctrl('U'), bestlineEditKillLeft(&l));
-        Case(Ctrl('T'), bestlineEditTranspose(&l));
-        Case(Ctrl('K'), bestlineEditKillRight(&l));
-        Case(Ctrl('W'), bestlineEditRuboutWord(&l));
+            Case(Ctrl('P'), bestlineEditUp(&l));
+            Case(Ctrl('E'), bestlineEditEnd(&l));
+            Case(Ctrl('N'), bestlineEditDown(&l));
+            Case(Ctrl('A'), bestlineEditHome(&l));
+            Case(Ctrl('B'), bestlineEditLeft(&l));
+            Case(Ctrl('@'), bestlineEditMark(&l));
+            Case(Ctrl('Y'), bestlineEditYank(&l));
+            Case(Ctrl('Q'), bestlineEditCtrlq(&l));
+            Case(Ctrl('F'), bestlineEditRight(&l));
+            Case(Ctrl('\\'), bestlineEditQuit());
+            Case(Ctrl('S'), bestlineEditPause(&l));
+            Case(Ctrl('?'), bestlineEditRubout(&l));
+            Case(Ctrl('H'), bestlineEditRubout(&l));
+            Case(Ctrl('L'), bestlineEditRefresh(&l));
+            Case(Ctrl('Z'), bestlineEditSuspend());
+            Case(Ctrl('U'), bestlineEditKillLeft(&l));
+            Case(Ctrl('T'), bestlineEditTranspose(&l));
+            Case(Ctrl('K'), bestlineEditKillRight(&l));
+            Case(Ctrl('W'), bestlineEditRuboutWord(&l));
         case Ctrl('C'):
-            if (bestlineRead(l.ifd,seq,sizeof(seq),&l) != 1) break;
-            switch (seq[0]) {
-            Case(Ctrl('C'), bestlineEditInterrupt());
-            Case(Ctrl('B'), bestlineEditBarf(&l));
-            Case(Ctrl('S'), bestlineEditSlurp(&l));
-            Case(Ctrl('R'), bestlineEditRaise(&l));
-            default:
-                break;
+            if (emacsmode) {
+                if (bestlineRead(l.ifd, seq, sizeof(seq), &l) != 1)
+                    break;
+                switch (seq[0]) {
+                    Case(Ctrl('C'), bestlineEditInterrupt());
+                    Case(Ctrl('B'), bestlineEditBarf(&l));
+                    Case(Ctrl('S'), bestlineEditSlurp(&l));
+                    Case(Ctrl('R'), bestlineEditRaise(&l));
+                default:
+                    break;
+                }
+            } else {
+                bestlineEditInterrupt();
             }
             break;
         case Ctrl('X'):
@@ -3106,98 +3207,162 @@ static ssize_t bestlineEdit(int stdin_fd, int stdout_fd, const char *prompt,
             if (l.len) {
                 bestlineEditDelete(&l);
             } else {
-                free(history[--historylen]);
-                history[historylen] = 0;
+                if (historylen) {
+                    free(history[--historylen]);
+                    history[historylen] = 0;
+                }
                 free(l.buf);
+                abFree(&l.full);
                 return -1;
             }
             break;
-        case '\r':
+        case '\n':
             l.final = 1;
-            free(history[--historylen]);
-            history[historylen] = 0;
             bestlineEditEnd(&l);
             bestlineRefreshLineForce(&l);
-            if ((p = (char *)realloc(l.buf, l.len + 1))) l.buf = p;
-            *obuf = l.buf;
-            return l.len;
+            l.final = 0;
+            abAppend(&l.full, l.buf, l.len);
+            l.prompt = "... ";
+            abAppends(&l.full, "\n");
+            l.len = 0;
+            l.pos = 0;
+            bestlineWriteStr(stdout_fd, "\r\n");
+            bestlineRefreshLineForce(&l);
+            break;
+        case '\r': {
+            char is_finished = 1;
+            char needs_strip = 0;
+            if (historylen) {
+                free(history[--historylen]);
+                history[historylen] = 0;
+            }
+            l.final = 1;
+            bestlineEditEnd(&l);
+            bestlineRefreshLineForce(&l);
+            l.final = 0;
+            abAppend(&l.full, l.buf, l.len);
+            if (pastemode)
+                is_finished = 0;
+            if (balancemode)
+                if (!IsBalanced(&l.full))
+                    is_finished = 0;
+            if (llamamode)
+                if (StartsWith(l.full.b, "\"\"\""))
+                    needs_strip = is_finished = l.full.len > 6 && EndsWith(l.full.b, "\"\"\"");
+            if (is_finished) {
+                if (needs_strip) {
+                    int len = l.full.len - 6;
+                    *obuf = strndup(l.full.b + 3, len);
+                    abFree(&l.full);
+                    free(l.buf);
+                    return len;
+                } else {
+                    *obuf = l.full.b;
+                    free(l.buf);
+                    return l.full.len;
+                }
+            } else {
+                l.prompt = "... ";
+                abAppends(&l.full, "\n");
+                l.len = 0;
+                l.pos = 0;
+                bestlineWriteStr(stdout_fd, "\r\n");
+                bestlineRefreshLineForce(&l);
+            }
+            break;
+        }
         case 033:
-            if (nread < 2) break;
+            if (nread < 2)
+                break;
             switch (seq[1]) {
-            Case('<', bestlineEditBof(&l));
-            Case('>', bestlineEditEof(&l));
-            Case('B', bestlineEditBarf(&l));
-            Case('S', bestlineEditSlurp(&l));
-            Case('R', bestlineEditRaise(&l));
-            Case('y', bestlineEditRotate(&l));
-            Case('\\', bestlineEditSqueeze(&l));
-            Case('b', bestlineEditLeftWord(&l));
-            Case('f', bestlineEditRightWord(&l));
-            Case('h', bestlineEditRuboutWord(&l));
-            Case('d', bestlineEditDeleteWord(&l));
-            Case('l', bestlineEditLowercaseWord(&l));
-            Case('u', bestlineEditUppercaseWord(&l));
-            Case('c', bestlineEditCapitalizeWord(&l));
-            Case('t', bestlineEditTransposeWords(&l));
-            Case(Ctrl('B'), bestlineEditLeftExpr(&l));
-            Case(Ctrl('F'), bestlineEditRightExpr(&l));
-            Case(Ctrl('H'), bestlineEditRuboutWord(&l));
+                Case('<', bestlineEditBof(&l));
+                Case('>', bestlineEditEof(&l));
+                Case('B', bestlineEditBarf(&l));
+                Case('S', bestlineEditSlurp(&l));
+                Case('R', bestlineEditRaise(&l));
+                Case('y', bestlineEditRotate(&l));
+                Case('\\', bestlineEditSqueeze(&l));
+                Case('b', bestlineEditLeftWord(&l));
+                Case('f', bestlineEditRightWord(&l));
+                Case('h', bestlineEditRuboutWord(&l));
+                Case('d', bestlineEditDeleteWord(&l));
+                Case('l', bestlineEditLowercaseWord(&l));
+                Case('u', bestlineEditUppercaseWord(&l));
+                Case('c', bestlineEditCapitalizeWord(&l));
+                Case('t', bestlineEditTransposeWords(&l));
+                Case(Ctrl('B'), bestlineEditLeftExpr(&l));
+                Case(Ctrl('F'), bestlineEditRightExpr(&l));
+                Case(Ctrl('H'), bestlineEditRuboutWord(&l));
             case '[':
-                if (nread < 3) break;
+                if (nread == 6 && !memcmp(seq, "\033[200~", 6)) {
+                    pastemode = 1;
+                    break;
+                }
+                if (nread == 6 && !memcmp(seq, "\033[201~", 6)) {
+                    pastemode = 0;
+                    break;
+                }
+                if (nread < 3)
+                    break;
                 if (seq[2] >= '0' && seq[2] <= '9') {
-                    if (nread < 4) break;
+                    if (nread < 4)
+                        break;
                     if (seq[3] == '~') {
                         switch (seq[2]) {
-                        Case('1', bestlineEditHome(&l));   /* \e[1~ */
-                        Case('3', bestlineEditDelete(&l)); /* \e[3~ */
-                        Case('4', bestlineEditEnd(&l));    /* \e[4~ */
+                            Case('1', bestlineEditHome(&l)); /* \e[1~ */
+                            Case('3', bestlineEditDelete(&l)); /* \e[3~ */
+                            Case('4', bestlineEditEnd(&l)); /* \e[4~ */
                         default:
                             break;
                         }
                     }
                 } else {
                     switch (seq[2]) {
-                    Case('A', bestlineEditUp(&l));
-                    Case('B', bestlineEditDown(&l));
-                    Case('C', bestlineEditRight(&l));
-                    Case('D', bestlineEditLeft(&l));
-                    Case('H', bestlineEditHome(&l));
-                    Case('F', bestlineEditEnd(&l));
+                        Case('A', bestlineEditUp(&l));
+                        Case('B', bestlineEditDown(&l));
+                        Case('C', bestlineEditRight(&l));
+                        Case('D', bestlineEditLeft(&l));
+                        Case('H', bestlineEditHome(&l));
+                        Case('F', bestlineEditEnd(&l));
                     default:
                         break;
                     }
                 }
                 break;
             case 'O':
-                if (nread < 3) break;
+                if (nread < 3)
+                    break;
                 switch (seq[2]) {
-                Case('A', bestlineEditUp(&l));
-                Case('B', bestlineEditDown(&l));
-                Case('C', bestlineEditRight(&l));
-                Case('D', bestlineEditLeft(&l));
-                Case('H', bestlineEditHome(&l));
-                Case('F', bestlineEditEnd(&l));
+                    Case('A', bestlineEditUp(&l));
+                    Case('B', bestlineEditDown(&l));
+                    Case('C', bestlineEditRight(&l));
+                    Case('D', bestlineEditLeft(&l));
+                    Case('H', bestlineEditHome(&l));
+                    Case('F', bestlineEditEnd(&l));
                 default:
                     break;
                 }
                 break;
             case 033:
-                if (nread < 3) break;
+                if (nread < 3)
+                    break;
                 switch (seq[2]) {
                 case '[':
-                    if (nread < 4) break;
+                    if (nread < 4)
+                        break;
                     switch (seq[3]) {
-                    Case('C', bestlineEditRightExpr(&l)); /* \e\e[C alt-right */
-                    Case('D', bestlineEditLeftExpr(&l));  /* \e\e[D alt-left */
+                        Case('C', bestlineEditRightExpr(&l)); /* \e\e[C alt-right */
+                        Case('D', bestlineEditLeftExpr(&l)); /* \e\e[D alt-left */
                     default:
                         break;
                     }
                     break;
                 case 'O':
-                    if (nread < 4) break;
+                    if (nread < 4)
+                        break;
                     switch (seq[3]) {
-                    Case('C', bestlineEditRightExpr(&l)); /* \e\eOC alt-right */
-                    Case('D', bestlineEditLeftExpr(&l));  /* \e\eOD alt-left */
+                        Case('C', bestlineEditRightExpr(&l)); /* \e\eOC alt-right */
+                        Case('D', bestlineEditLeftExpr(&l)); /* \e\eOD alt-left */
                     default:
                         break;
                     }
@@ -3213,14 +3378,14 @@ static ssize_t bestlineEdit(int stdin_fd, int stdout_fd, const char *prompt,
         default:
             if (!IsControl(seq[0])) { /* only sees canonical c0 */
                 if (xlatCallback) {
-                    rune = GetUtf8(seq,nread);
+                    rune = GetUtf8(seq, nread);
                     w = EncodeUtf8(xlatCallback(rune.c));
                     nread = 0;
                     do {
                         seq[nread++] = w;
                     } while ((w >>= 8));
                 }
-                bestlineEditInsert(&l,seq,nread);
+                bestlineEditInsert(&l, seq, nread);
             }
             break;
         }
@@ -3250,12 +3415,15 @@ static void bestlineAtExit(void) {
 
 int bestlineHistoryAdd(const char *line) {
     char *linecopy;
-    if (!BESTLINE_MAX_HISTORY) return 0;
-    if (historylen && !strcmp(history[historylen-1], line)) return 0;
-    if (!(linecopy = strdup(line))) return 0;
+    if (!BESTLINE_MAX_HISTORY)
+        return 0;
+    if (historylen && !strcmp(history[historylen - 1], line))
+        return 0;
+    if (!(linecopy = strdup(line)))
+        return 0;
     if (historylen == BESTLINE_MAX_HISTORY) {
         free(history[0]);
-        memmove(history,history+1,sizeof(char*)*(BESTLINE_MAX_HISTORY-1));
+        memmove(history, history + 1, sizeof(char *) * (BESTLINE_MAX_HISTORY - 1));
         historylen--;
     }
     history[historylen++] = linecopy;
@@ -3271,14 +3439,15 @@ int bestlineHistorySave(const char *filename) {
     FILE *fp;
     unsigned j;
     mode_t old_umask;
-    old_umask = umask(S_IXUSR|S_IRWXG|S_IRWXO);
-    fp = fopen(filename,"w");
+    old_umask = umask(S_IXUSR | S_IRWXG | S_IRWXO);
+    fp = fopen(filename, "w");
     umask(old_umask);
-    if (!fp) return -1;
-    chmod(filename,S_IRUSR|S_IWUSR);
+    if (!fp)
+        return -1;
+    chmod(filename, S_IRUSR | S_IWUSR);
     for (j = 0; j < historylen; j++) {
-        fputs(history[j],fp);
-        fputc('\n',fp);
+        fputs(history[j], fp);
+        fputc('\n', fp);
     }
     fclose(fp);
     return 0;
@@ -3299,15 +3468,19 @@ int bestlineHistoryLoad(const char *filename) {
     size_t i, j, k, n, t;
     char *m, *e, *p, *q, *f, *s;
     err = errno, rc = 0;
-    if (!BESTLINE_MAX_HISTORY) return 0;
-    if (!(h = (char**)calloc(2*BESTLINE_MAX_HISTORY,sizeof(char*)))) return -1;
-    if ((fd = open(filename,O_RDONLY)) != -1) {
+    if (!BESTLINE_MAX_HISTORY)
+        return 0;
+    if (!(h = (char **)calloc(2 * BESTLINE_MAX_HISTORY, sizeof(char *))))
+        return -1;
+    if ((fd = open(filename, O_RDONLY)) != -1) {
         if ((n = GetFdSize(fd))) {
-            if ((m = (char *)mmap(0,n,PROT_READ,MAP_SHARED,fd,0))!=MAP_FAILED) {
+            if ((m = (char *)mmap(0, n, PROT_READ, MAP_SHARED, fd, 0)) != MAP_FAILED) {
                 for (i = 0, e = (p = m) + n; p < e; p = f + 1) {
-                    if (!(q = (char *)memchr(p, '\n', e - p))) q = e;
+                    if (!(q = (char *)memchr(p, '\n', e - p)))
+                        q = e;
                     for (f = q; q > p; --q) {
-                        if (q[-1] != '\n' && q[-1] != '\r') break;
+                        if (q[-1] != '\n' && q[-1] != '\r')
+                            break;
                     }
                     if (q > p) {
                         h[i * 2 + 0] = p;
@@ -3318,13 +3491,13 @@ int bestlineHistoryLoad(const char *filename) {
                 bestlineHistoryFree();
                 for (j = 0; j < BESTLINE_MAX_HISTORY; ++j) {
                     if (h[(k = (i + j) % BESTLINE_MAX_HISTORY) * 2]) {
-                        if ((s = (char *)malloc((t=h[k*2+1]-h[k*2])+1))) {
-                            memcpy(s,h[k*2],t),s[t]=0;
+                        if ((s = (char *)malloc((t = h[k * 2 + 1] - h[k * 2]) + 1))) {
+                            memcpy(s, h[k * 2], t), s[t] = 0;
                             history[historylen++] = s;
                         }
                     }
                 }
-                munmap(m,n);
+                munmap(m, n);
             } else {
                 rc = -1;
             }
@@ -3340,6 +3513,48 @@ int bestlineHistoryLoad(const char *filename) {
 }
 
 /**
+ * Like bestlineRaw, but with the additional parameter init used as the buffer
+ * initial value.
+ */
+char *bestlineRawInit(const char *prompt, const char *init, int infd, int outfd) {
+    char *buf;
+    ssize_t rc;
+    static char once;
+    struct sigaction sa[3];
+    if (!once)
+        atexit(bestlineAtExit), once = 1;
+    if (enableRawMode(infd) == -1)
+        return 0;
+    buf = 0;
+    gotint = 0;
+    sigemptyset(&sa->sa_mask);
+    sa->sa_flags = 0;
+    sa->sa_handler = bestlineOnInt;
+    sigaction(SIGINT, sa, sa + 1);
+    sigaction(SIGQUIT, sa, sa + 2);
+    bestlineWriteStr(outfd, "\033[?2004h"); // enable bracketed paste mode
+    rc = bestlineEdit(infd, outfd, prompt, init, &buf);
+    bestlineWriteStr(outfd, "\033[?2004l"); // disable bracketed paste mode
+    bestlineDisableRawMode();
+    sigaction(SIGQUIT, sa + 2, 0);
+    sigaction(SIGINT, sa + 1, 0);
+    if (gotint) {
+        free(buf);
+        buf = 0;
+        raise(gotint);
+        errno = EINTR;
+        rc = -1;
+    }
+    bestlineWriteStr(outfd, "\r\n");
+    if (rc != -1) {
+        return buf;
+    } else {
+        free(buf);
+        return 0;
+    }
+}
+
+/**
  * Reads line interactively.
  *
  * This function can be used instead of bestline() in cases where we
@@ -3349,36 +3564,34 @@ int bestlineHistoryLoad(const char *filename) {
  * @return chomped allocated string of read line or null on eof/error
  */
 char *bestlineRaw(const char *prompt, int infd, int outfd) {
-    char *buf;
-    ssize_t rc;
-    static char once;
-    struct sigaction sa[3];
-    if (!once) atexit(bestlineAtExit), once = 1;
-    if (enableRawMode(infd) == -1) return 0;
-    buf = 0;
-    gotint = 0;
-    sigemptyset(&sa->sa_mask);
-    sa->sa_flags = 0;
-    sa->sa_handler = bestlineOnInt;
-    sigaction(SIGINT,sa,sa+1);
-    sigaction(SIGQUIT,sa,sa+2);
-    rc = bestlineEdit(infd,outfd,prompt,&buf);
-    bestlineDisableRawMode();
-    sigaction(SIGQUIT,sa+2,0);
-    sigaction(SIGINT,sa+1,0);
-    if (gotint) {
-        free(buf);
-        buf = 0;
-        raise(gotint);
-        errno = EINTR;
-        rc = -1;
-    }
-    if (rc != -1) {
-        bestlineWriteStr(outfd,"\n");
-        return buf;
-    } else {
-        free(buf);
+    return bestlineRawInit(prompt, "", infd, outfd);
+}
+
+/**
+ * Like bestline, but with the additional parameter init used as the buffer
+ * initial value. The init parameter is only used if the terminal has basic
+ * capabilites.
+ */
+char *bestlineInit(const char *prompt, const char *init) {
+    if (prompt && *prompt && (strchr(prompt, '\t') || strchr(prompt + 1, '\r'))) {
+        errno = EINVAL;
         return 0;
+    }
+    if ((!isatty(fileno(stdin)) || !isatty(fileno(stdout)))) {
+        if (prompt && *prompt && (IsCharDev(fileno(stdin)) && IsCharDev(fileno(stdout)))) {
+            fputs(prompt, stdout);
+            fflush(stdout);
+        }
+        return GetLine(stdin, stdout);
+    } else if (bestlineIsUnsupportedTerm()) {
+        if (prompt && *prompt) {
+            fputs(prompt, stdout);
+            fflush(stdout);
+        }
+        return GetLine(stdin, stdout);
+    } else {
+        fflush(stdout);
+        return bestlineRawInit(prompt, init, fileno(stdin), fileno(stdout));
     }
 }
 
@@ -3397,30 +3610,7 @@ char *bestlineRaw(const char *prompt, int infd, int outfd) {
  * @return chomped allocated string of read line or null on eof/error
  */
 char *bestline(const char *prompt) {
-    if (prompt && *prompt &&
-        (strchr(prompt, '\n') || strchr(prompt, '\t') ||
-         strchr(prompt + 1, '\r'))) {
-        errno = EINVAL;
-        return 0;
-    }
-    if ((!isatty(fileno(stdin)) ||
-         !isatty(fileno(stdout)))) {
-        if (prompt && *prompt && (IsCharDev(fileno(stdin)) &&
-                                  IsCharDev(fileno(stdout)))) {
-            fputs(prompt,stdout);
-            fflush(stdout);
-        }
-        return GetLine(stdin, stdout);
-    } else if (bestlineIsUnsupportedTerm()) {
-        if (prompt && *prompt) {
-            fputs(prompt,stdout);
-            fflush(stdout);
-        }
-        return GetLine(stdin, stdout);
-    } else {
-        fflush(stdout);
-        return bestlineRaw(prompt,fileno(stdin),fileno(stdout));
-    }
+    return bestlineInit(prompt, "");
 }
 
 /**
@@ -3454,8 +3644,7 @@ char *bestlineWithHistory(const char *prompt, const char *prog) {
         } else {
             b = "";
             if (!(a = getenv("HOME"))) {
-                if (!(a = getenv("HOMEDRIVE")) ||
-                    !(b = getenv("HOMEPATH"))) {
+                if (!(a = getenv("HOMEDRIVE")) || !(b = getenv("HOMEPATH"))) {
                     a = "";
                 }
             }
@@ -3529,9 +3718,9 @@ void bestlineSetXlatCallback(bestlineXlatCallback *fn) {
 void bestlineAddCompletion(bestlineCompletions *lc, const char *str) {
     size_t len;
     char *copy, **cvec;
-    if ((copy = (char *)malloc((len = strlen(str))+1))) {
-        memcpy(copy,str,len+1);
-        if ((cvec = (char **)realloc(lc->cvec,(lc->len+1)*sizeof(*lc->cvec)))) {
+    if ((copy = (char *)malloc((len = strlen(str)) + 1))) {
+        memcpy(copy, str, len + 1);
+        if ((cvec = (char **)realloc(lc->cvec, (lc->len + 1) * sizeof(*lc->cvec)))) {
             lc->cvec = cvec;
             lc->cvec[lc->len++] = copy;
         } else {
@@ -3570,4 +3759,79 @@ void bestlineMaskModeEnable(void) {
  */
 void bestlineMaskModeDisable(void) {
     maskmode = 0;
+}
+
+/**
+ * Enables or disables "balance mode".
+ *
+ * When it is enabled, bestline() will block until parentheses are
+ * balanced. This is useful for code but not for free text.
+ */
+void bestlineBalanceMode(char mode) {
+    balancemode = mode;
+}
+
+/**
+ * Enables or disables "ollama mode".
+ *
+ * This enables you to type multiline input by putting triple quotes at
+ * the beginning and end. For example:
+ *
+ *     >>> """
+ *     ... second line
+ *     ... third line
+ *     ... """
+ *
+ * Would yield the string `"\nsecond line\nthird line\n"`.
+ *
+ * @param mode is 1 to enable, or 0 to disable
+ */
+void bestlineLlamaMode(char mode) {
+    llamamode = mode;
+}
+
+/**
+ * Enables Emacs mode.
+ *
+ * This mode remaps CTRL-C so you can use additional shortcuts, like C-c
+ * C-s for slurp. By default, CTRL-C raises SIGINT for exiting programs.
+ */
+void bestlineEmacsMode(char mode) {
+    emacsmode = mode;
+}
+
+/**
+ * Allows implementation of user functions for read, write, and poll
+ * with the intention of polling for background I/O.
+ */
+
+static int MyRead(int fd, void *c, int n) {
+    return read(fd, c, n);
+}
+
+static int MyWrite(int fd, const void *c, int n) {
+    return write(fd, c, n);
+}
+
+static int MyPoll(int fd, int events, int to) {
+    struct pollfd p[1];
+    p[0].fd = fd;
+    p[0].events = events;
+    return poll(p, 1, to);
+}
+
+void bestlineUserIO(int (*userReadFn)(int, void *, int), int (*userWriteFn)(int, const void *, int),
+                    int (*userPollFn)(int, int, int)) {
+    if (userReadFn)
+        _MyRead = userReadFn;
+    else
+        _MyRead = MyRead;
+    if (userWriteFn)
+        _MyWrite = userWriteFn;
+    else
+        _MyWrite = MyWrite;
+    if (userPollFn)
+        _MyPoll = userPollFn;
+    else
+        _MyPoll = MyPoll;
 }

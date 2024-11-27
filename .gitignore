@@ -1,4 +1,7 @@
+*.o
+*.bin
+*.bin.dbg
+*.com.dbg
+*.elf
+.aarch64
 /lisp
-/*.o
-/*.bin
-/*.bin.dbg
