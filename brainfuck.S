@@ -29,13 +29,13 @@ _start:	mov	$0x7e00,%di
 Load:	xor	%ax,%ax
 	int	$0x16
 	stosb
+	cmp	$'$',%al
+	je	LdDone
 	cmp	$'[',%al
 	je	Lsb
-	cmp	$']',%al
-	je	Rsb
-	cmp	$'$',%al
-	jne	Load
-	pop	%si
+	# Treat invalid char as ']' to save an instruction
+	jmp	Rsb
+LdDone:	pop	%si
 Brain:	lodsb
         cbw
 	mov	$0x0e,%bh
