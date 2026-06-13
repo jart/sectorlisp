@@ -252,8 +252,6 @@ Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
 	mov	(%bx,%si),%si
 	scasw
 	jne	1b
-	.byte	0xA9				# shifted ip; reads as test, cmp
-Cadr:	mov	(%bx,%di),%di			# contents of decrement register
 	.byte	0x3C				# cmp §scasw,%al (nop next byte)
 Cdr:	scasw					# increments our data index by 2
 Car:	mov	(%di),%ax			# contents of address register!!
@@ -269,7 +267,8 @@ Evcon:	push	%di				# save c
 	jz	1b
 	push	(%di)				# push Car(c)
 .EvCadr:pop	%di
-	call	Cadr				# ax = Cadar(c)
+	mov	(%bx,%di),%di
+	mov	(%di),%ax			# ax = Cadar(c)
 #	jmp	Eval
 
 Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
