@@ -75,7 +75,10 @@ GetToken:					# GetToken():al, dl is g_look
 	jbe	2f
 	stosb
 	xchg	%ax,%si
-2:	call	GetChar				# exchanges dx and ax
+2:	xor	%ax,%ax				# GetChar→al:dl
+	int	$0x16				# get keystroke
+	mov	%ax,%bp				# used for READ
+	call	PutChar				# exchanges dx and ax
 	cmp	$' ',%al
 	jbe	1b
 	cmp	$')',%al
@@ -98,8 +101,14 @@ GetToken:					# GetToken():al, dl is g_look
 	jz	4f				# jump if nil
 	mov	$249,%al			# bullet (A∙B)
 	call	.PutObject
-4:	mov	$')',%al
-	jmp	PutChar
+4:	mov	$'\r'^'\n'^')',%al		# print ')'
+PutLf:	xor	$'\r'^'\n',%al
+PutChar:mov	$0x0e,%ah			# prints CP-437
+	int	$0x10				# vidya service
+	cmp	$'\r',%al			# don't clobber
+	je	PutLf				# look xchg ret
+	xchg	%dx,%ax
+	ret
 
 .ifPrint:
 	xchg	%di,%si				# Print(x:si)
@@ -147,18 +156,6 @@ Intern:	push	%cx				# Intern(cx,di): ax
 	jmp	1b
 8:	rep movsb				# memcpy(di,si,cx)
 9:	pop	%cx
-	ret
-
-GetChar:xor	%ax,%ax				# GetChar→al:dl
-	int	$0x16				# get keystroke
-	mov	%ax,%bp				# used for READ
-PutChar:mov	$0x0e,%ah			# prints CP-437
-	int	$0x10				# vidya service
-	cmp	$'\r',%al			# don't clobber
-	jne	.RetDx				# look xchg ret
-	mov	$'\n',%al
-	jmp	PutChar
-.RetDx:	xchg	%dx,%ax
 	ret
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -255,8 +252,6 @@ Assoc:	mov	%dx,%si				# Assoc(x:ax,y:dx):ax
 	mov	(%bx,%si),%si
 	scasw
 	jne	1b
-	.byte	0xA9				# shifted ip; reads as test, cmp
-Cadr:	mov	(%bx,%di),%di			# contents of decrement register
 	.byte	0x3C				# cmp §scasw,%al (nop next byte)
 Cdr:	scasw					# increments our data index by 2
 Car:	mov	(%di),%ax			# contents of address register!!
@@ -272,7 +267,8 @@ Evcon:	push	%di				# save c
 	jz	1b
 	push	(%di)				# push Car(c)
 .EvCadr:pop	%di
-	call	Cadr				# ax = Cadar(c)
+	mov	(%bx,%di),%di
+	mov	(%di),%ax			# ax = Cadar(c)
 #	jmp	Eval
 
 Eval:	test	%ax,%ax				# Eval(e:ax,a:dx):ax
