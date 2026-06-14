@@ -5,3 +5,4 @@
 *.elf
 .aarch64
 /lisp
+!/bin/sectorlisp.bin
