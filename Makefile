@@ -14,7 +14,7 @@ all:	lisp				\
 	bin/sectorlisp.bin.dbg
 
 .PHONY:	clean
-clean:;	$(RM) lisp lisp.o bestline.o sectorlisp.o sectorlisp.bin sectorlisp.bin.dbg
+clean:;	$(RM) lisp lisp.o bestline.o sectorlisp.o bin/sectorlisp.bin bin/sectorlisp.bin.dbg
 
 lisp: lisp.o bestline.o
 lisp.o: lisp.c bestline.h
@@ -27,4 +27,4 @@ bin/sectorlisp.bin.dbg: bin/sectorlisp.o sectorlisp.lds
 	$(LD) -T sectorlisp.lds -o $@ $<
 
 bin/sectorlisp.bin: bin/sectorlisp.bin.dbg
-	objcopy -S -O binary sectorlisp.bin.dbg sectorlisp.bin
+	objcopy -S -O binary $< $@
